@@ -56,11 +56,16 @@ namespace BlueCheese.LocalCommands.Tests
 		public void LogException(Exception ex) => Logs.Add("EX: " + ex.Message);
 	}
 
-	public class FakeCommandSyncService : ICommandSyncService
+	public class FakeCommandSyncService : ISyncService
 	{
-		public Task<SyncResponse> SyncCommandsAsync(SyncRequest request)
+		public Task<FetchResponse> FetchAsync()
 		{
-			return Task.FromResult(SyncResponse.Success());
+			return Task.FromResult(FetchResponse.Ok(new()));
+		}
+
+		public Task<SyncResponse> SyncAsync(SyncRequest request)
+		{
+			return Task.FromResult(SyncResponse.Ok());
 		}
 	}
 }

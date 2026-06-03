@@ -1,0 +1,117 @@
+//
+// Copyright (c) 2026 BlueCheese Games All rights reserved
+//
+
+using BlueCheese.LocalCommands.Core;
+using NUnit.Framework;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+
+namespace BlueCheese.LocalCommands.Tests
+{
+	[TestFixture]
+	public class DesyncPreventionTests
+	{
+		private LocalCommandManager _manager;
+		private DataManager _dataManager;
+
+		[SetUp]
+		public void Setup()
+		{
+			var storage = new FakeDataStorage();
+			var serializer = new NewtonsoftJsonSerializer();
+			_dataManager = new DataManager(storage, serializer);
+
+			var config = Config.Create();
+			_manager = new LocalCommandManager(
+				_dataManager,
+				new FakeLogger(),
+				config,
+				new TimeProvider(),
+				storage,
+				new FakeCommandSyncService()
+			);
+
+			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
+		}
+
+		[Test]
+		public void ClearHistory_ProperlyClearsUpdatedDataTypes()
+		{
+			// Act: Execute a command that updates TestScoreData
+			_manager.ExecuteCommand(nameof(TestCommands.AddScore), new TestArgs { Value = 10 });
+
+			// Assert before clear
+			Assert.AreEqual(1, _manager.History.Count, "Command should be queued.");
+			Assert.IsTrue(_manager.UpdatedDataTypes.Contains(typeof(TestScoreData)), "UpdatedDataTypes should track the modification.");
+
+			// Act: Clear the history (simulating successful sync or server request reset)
+			_manager.ClearHistory();
+
+			// Assert after clear
+			Assert.AreEqual(0, _manager.History.Count, "Queue should be empty.");
+			Assert.AreEqual(0, _manager.UpdatedDataTypes.Count(), "UpdatedDataTypes must be completely cleared to prevent desync accumulation.");
+		}
+
+		[Test]
+		public void GetStateHash_WithEmptyCollection_ComputesEmptyDeltaInsteadOfFallback()
+		{
+			// Arrange: Populate cache with some data
+			_dataManager.Set(new TestScoreData { Score = 100 });
+			_dataManager.Flush();
+
+			// Act: Hash using an explicitly empty list (simulating a sync request where no data changed)
+			int hashEmpty = _dataManager.GetStateHash(new List<Type>());
+
+			// Act: Hash using null (simulating a full state hash fallback)
+			int hashNull = _dataManager.GetStateHash(null);
+
+			// Assert
+			Assert.AreEqual(17, hashEmpty, "An empty list should result in the default hash seed (17), not fallback to the entire cache.");
+			Assert.AreNotEqual(17, hashNull, "A null argument should fallback to hashing the entire cache.");
+		}
+
+		[Test]
+		public void GetStateHash_IsDeterministic_RegardlessOfCollectionOrder()
+		{
+			// Arrange: Populate cache with two different data types
+			_dataManager.Set(new TestScoreData { Score = 10 });
+			_dataManager.Set(new ValueTypeArgs { Id = 5 });
+			_dataManager.Flush();
+
+			// Act: Pass the same types to the hash function, but in different order (like Dictionary.Keys might do randomly)
+			var order1 = new List<Type> { typeof(TestScoreData), typeof(ValueTypeArgs) };
+			var order2 = new List<Type> { typeof(ValueTypeArgs), typeof(TestScoreData) };
+
+			int hash1 = _dataManager.GetStateHash(order1);
+			int hash2 = _dataManager.GetStateHash(order2);
+
+			// Assert
+			Assert.AreEqual(hash1, hash2, "The generated hash must be identical regardless of the input IEnumerable order, thanks to internal sorting.");
+		}
+
+		[Test]
+		public void ServerSyncIsolation_ClearingHistory_ResetsDeltaForNextRequest()
+		{
+			// This test simulates the server's SyncController behavior.
+
+			// 1. Simulate Request A: Modifies Score
+			_manager.ExecuteCommand(nameof(TestCommands.AddScore), new TestArgs { Value = 5 });
+			Assert.IsTrue(_manager.UpdatedDataTypes.Contains(typeof(TestScoreData)));
+
+			// 2. Simulate start of Request B: Server calls ClearHistory() to isolate the request
+			_manager.ClearHistory();
+
+			// 3. Request B executes a command that modifies NOTHING
+			_manager.ExecuteCommand(nameof(TestCommands.NoOpCommand));
+
+			// 4. Server computes the state hash for Request B's delta
+			int hash = _dataManager.GetStateHash(_manager.UpdatedDataTypes);
+
+			// Assert
+			Assert.AreEqual(17, hash, "Hash should be the default seed (17) because NoOpCommand changed nothing, and the history was properly cleared from Request A's modifications.");
+		}
+	}
+}

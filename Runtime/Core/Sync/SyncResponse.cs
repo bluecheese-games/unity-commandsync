@@ -7,14 +7,17 @@ using System;
 namespace BlueCheese.LocalCommands.Core
 {
 	[Serializable]
-	public class SyncResponse
+	public class SyncResponse : Response
 	{
-		public SyncResult Result { get; set; }
+		static public new SyncResponse Ok() => new()
+		{
+			Success = true
+		};
 
-		public string Message { get; set; }
-
-		public static SyncResponse Success() => new() { Result = SyncResult.Success, Message = "Ok" };
-		public static SyncResponse Desync() => new() { Result = SyncResult.Desync, Message = "Desynchronized" };
-		public static SyncResponse Error(string message = null) => new() { Result = SyncResult.Error, Message = message };
+		static public new SyncResponse Fail(string errorMessage) => new()
+		{
+			Success = false,
+			Message = errorMessage
+		};
 	}
 }

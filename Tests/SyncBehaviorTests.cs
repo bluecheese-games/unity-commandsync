@@ -4,6 +4,7 @@
 
 using BlueCheese.LocalCommands.Core;
 using NUnit.Framework;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading.Tasks;
 
@@ -30,7 +31,7 @@ namespace BlueCheese.LocalCommands.Tests
 		{
 			// Arrange: Inject a fake sync service that always returns Success
 			var successSyncService = new FakeCommandSyncService(); // Returns SyncResult.Success by default
-			_manager = new LocalCommandManager(_dataManager, new FakeLogger(), _config, new TimeProvider(), successSyncService);
+			_manager = new LocalCommandManager(_dataManager, new FakeLogger(), _config, new TimeProvider(), _storage, successSyncService);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			// Act: Execute a command to populate history, then sync
@@ -48,7 +49,7 @@ namespace BlueCheese.LocalCommands.Tests
 		{
 			// Arrange: Inject a custom fake sync service that returns Desync
 			var failingSyncService = new FailingCommandSyncService();
-			_manager = new LocalCommandManager(_dataManager, new FakeLogger(), _config, new TimeProvider(), failingSyncService);
+			_manager = new LocalCommandManager(_dataManager, new FakeLogger(), _config, new TimeProvider(), _storage, failingSyncService);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			// Act: Execute a command and attempt to sync
@@ -61,11 +62,16 @@ namespace BlueCheese.LocalCommands.Tests
 		}
 
 		// A specific fake service for simulating failures
-		private class FailingCommandSyncService : ICommandSyncService
+		private class FailingCommandSyncService : ISyncService
 		{
-			public Task<SyncResponse> SyncCommandsAsync(SyncRequest request)
+			public Task<SyncResponse> SyncAsync(SyncRequest request)
 			{
-				return Task.FromResult(SyncResponse.Desync());
+				return Task.FromResult(SyncResponse.Fail("Desynchronized"));
+			}
+
+			public Task<FetchResponse> FetchAsync()
+			{
+				return Task.FromResult(FetchResponse.Fail("Fetch failed"));
 			}
 		}
 	}

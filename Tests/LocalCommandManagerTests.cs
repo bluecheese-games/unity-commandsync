@@ -6,6 +6,7 @@ using NUnit.Framework;
 using System.Reflection;
 using System.Collections.Generic;
 using BlueCheese.LocalCommands.Core;
+using static BlueCheese.LocalCommands.Core.LocalCommandManager;
 
 namespace BlueCheese.LocalCommands.Tests
 {
@@ -29,7 +30,7 @@ namespace BlueCheese.LocalCommands.Tests
 			_syncService = new FakeCommandSyncService();
 
 			var config = Config.Create(new Dictionary<string, object> { { "multiplier", 2 } });
-			_manager = new LocalCommandManager(_dataManager, _logger, config, new TimeProvider(), _syncService);
+			_manager = new LocalCommandManager(_dataManager, _logger, config, new TimeProvider(), _storage, _syncService);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 		}
 
@@ -73,8 +74,9 @@ namespace BlueCheese.LocalCommands.Tests
 			_ = _manager.Sync();
 
 			Assert.AreEqual(0, _manager.History.Count);
-			var history = _dataManager.GetBox<LocalCommandManager.CommandHistory>().Value;
-			Assert.AreEqual(0, history.ToArray().Length);
+			bool loaded = _storage.TryLoad("LocalCommand_History", typeof(CommandHistory), out var historyObj);
+			Assert.IsTrue(loaded);
+			Assert.AreEqual(0, ((CommandHistory)historyObj).ToArray().Length);
 		}
 	}
 }

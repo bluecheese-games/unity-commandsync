@@ -27,7 +27,8 @@ namespace BlueCheese.LocalCommands.Tests
 				_dataManager,
 				new FakeLogger(),
 				config,
-				new TimeProvider()
+				new TimeProvider(),
+				storage
 			);
 
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());

@@ -74,10 +74,7 @@ namespace BlueCheese.LocalCommands.Core
 
 		public int GetStateHash(IEnumerable<Type> keysToHash = null)
 		{
-			if (keysToHash == null || !keysToHash.Any())
-			{
-				keysToHash = _cache.Keys;
-			}
+			keysToHash ??= _cache.Keys;
 
 			int hash = 17;
 			foreach (var type in keysToHash)
@@ -89,10 +86,55 @@ namespace BlueCheese.LocalCommands.Core
 				}
 				else
 				{
-					hash = hash * 31; // No value, just multiply by prime to change hash
+					hash = hash * 31;
 				}
 			}
 			return hash;
+		}
+
+		public Dictionary<string, string> ExportState(IEnumerable<Type> types)
+		{
+			var export = new Dictionary<string, string>();
+			foreach (var type in types)
+			{
+				// Force a save to storage if it's currently dirty in cache
+				if (_cache.TryGetValue(type, out var obj) && obj is IDataBox box && box.IsDirty)
+				{
+					_storage.Save(type.FullName, box.UntypedValue);
+					box.IsDirty = false;
+				}
+
+				if (_storage.TryLoad(type.FullName, type, out object value))
+				{
+					export[type.FullName] = _serializer.Serialize(value);
+				}
+			}
+			return export;
+		}
+
+		public void ImportState(Dictionary<string, string> serializedState)
+		{
+			foreach (var kvp in serializedState)
+			{
+				Type type = null;
+				// Find the type in the loaded assemblies
+				foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+				{
+					type = assembly.GetType(kvp.Key);
+					if (type != null) break;
+				}
+
+				if (type != null)
+				{
+					var deserialized = _serializer.Deserialize(kvp.Value, type);
+
+					// Save the new state directly into local storage
+					_storage.Save(kvp.Key, deserialized, type);
+
+					// Remove the old box from cache to force a fresh load from storage next time GetBox is called
+					_cache.Remove(type);
+				}
+			}
 		}
 	}
 }

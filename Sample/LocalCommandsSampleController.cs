@@ -29,23 +29,27 @@ public class UnityLogger : BlueCheese.LocalCommands.Core.ILogger
 public class PlayerPrefsDataStorage : IDataStorage
 {
 	private readonly ISerializer _serializer;
+	private readonly string _prefix;
 
-	public PlayerPrefsDataStorage(ISerializer serializer)
+	public PlayerPrefsDataStorage(ISerializer serializer, string prefix)
 	{
 		_serializer = serializer;
+		_prefix = prefix ?? "k";
 	}
 
 	public void Save<T>(string key, T data)
 	{
 		string serializedData = _serializer.Serialize(data);
-		PlayerPrefs.SetString(key, serializedData);
+		string fullKey = $"{_prefix}_{key}";
+		PlayerPrefs.SetString(fullKey, serializedData);
 	}
 
 	public bool TryLoad<T>(string key, out T data)
 	{
-		if (PlayerPrefs.HasKey(key))
+		string fullKey = $"{_prefix}_{key}";
+		if (PlayerPrefs.HasKey(fullKey))
 		{
-			string serializedData = PlayerPrefs.GetString(key);
+			string serializedData = PlayerPrefs.GetString(fullKey);
 			data = _serializer.Deserialize<T>(serializedData);
 			return true;
 		}
@@ -56,14 +60,16 @@ public class PlayerPrefsDataStorage : IDataStorage
 	public void Save(string key, object data, Type type)
 	{
 		string serializedData = _serializer.Serialize(data, type);
-		PlayerPrefs.SetString(key, serializedData);
+		string fullKey = $"{_prefix}_{key}";
+		PlayerPrefs.SetString(fullKey, serializedData);
 	}
 
 	public bool TryLoad(string key, Type type, out object data)
 	{
-		if (PlayerPrefs.HasKey(key))
+		string fullKey = $"{_prefix}_{key}";
+		if (PlayerPrefs.HasKey(fullKey))
 		{
-			string serializedData = PlayerPrefs.GetString(key);
+			string serializedData = PlayerPrefs.GetString(fullKey);
 			data = _serializer.Deserialize(serializedData, type);
 			return true;
 		}
@@ -72,9 +78,9 @@ public class PlayerPrefsDataStorage : IDataStorage
 	}
 }
 
-public class DummyCommandSyncService : ICommandSyncService
+public class DummyCommandSyncService : ISyncService
 {
-	public Task<SyncResponse> SyncCommandsAsync(SyncRequest request)
+	public Task<SyncResponse> SyncAsync(SyncRequest request)
 	{
 		Debug.Log($"Syncing {request.Commands.Length} commands to server...");
 		foreach (var cmd in request.Commands)
@@ -83,11 +89,13 @@ public class DummyCommandSyncService : ICommandSyncService
 		}
 
 		// Simulate a successful sync with no conflicts
-		var response = new SyncResponse
-		{
-			Result = SyncResult.Success,
-		};
-		return Task.FromResult(response);
+		return Task.FromResult(SyncResponse.Ok());
+	}
+
+	public Task<FetchResponse> FetchAsync()
+	{
+		// Simulate fetching full state from server (empty in this dummy implementation)
+		return Task.FromResult(FetchResponse.Ok(new()));
 	}
 }
 
@@ -101,24 +109,27 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private LocalCommandManager _localCommandManager;
 	private IReadOnlyDataManager _dataManager;
 
-	private void Awake()
+	private async void Awake()
 	{
-		InitializeManager();
+		await InitializeManager();
 	}
 
-	private void InitializeManager()
+	private async Task InitializeManager()
 	{
 		var logger = new UnityLogger();
 		var serializer = new NewtonsoftJsonSerializer();
-		var dataStorage = new PlayerPrefsDataStorage(serializer);
+		var dataStorage = new PlayerPrefsDataStorage(serializer, "Sample");
 		var dataManager = new DataManager(dataStorage, serializer);
 		var timeProvider = new TimeProvider();
 		var syncService = new UnityHttpSyncService(_syncEndpoint, serializer);
+		var commandsDataStorage = new PlayerPrefsDataStorage(serializer, "Commands");
 		var config = Config.Create();
-		_localCommandManager = new LocalCommandManager(dataManager, logger, config, timeProvider, syncService);
+		_localCommandManager = new LocalCommandManager(dataManager, logger, config, timeProvider, commandsDataStorage, syncService);
 		_localCommandManager.RegisterCommands(typeof(SampleCommands).Assembly);
 
 		_dataManager = dataManager;
+
+		await _localCommandManager.LoadData();
 
 		Dump();
 	}
@@ -293,7 +304,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	/// <summary>
 	/// Synchronization service that sends the command history to an HTTP API.
 	/// </summary>
-	public class UnityHttpSyncService : ICommandSyncService
+	public class UnityHttpSyncService : ISyncService
 	{
 		private readonly string _serverUrl;
 		private readonly ISerializer _serializer;
@@ -304,7 +315,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 			_serializer = serializer;
 		}
 
-		public async Task<SyncResponse> SyncCommandsAsync(SyncRequest request)
+		public async Task<SyncResponse> SyncAsync(SyncRequest request)
 		{
 			// Serialize the request (Commands + Hash)
 			string jsonPayload = _serializer.Serialize(request);
@@ -329,7 +340,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 			if (www.result == UnityWebRequest.Result.ConnectionError || www.result == UnityWebRequest.Result.ProtocolError)
 			{
 				Debug.LogError($"[SyncService] Sync error: {www.error}");
-				return SyncResponse.Error(www.error);
+				return SyncResponse.Fail(www.error);
 			}
 
 			try
@@ -338,13 +349,46 @@ public class LocalCommandsSampleController : MonoBehaviour
 				var responseText = www.downloadHandler.text;
 				var response = JsonConvert.DeserializeObject<SyncResponse>(responseText);
 
-				Debug.Log($"[SyncService] Server response: {response.Result} with message: {response.Message}");
-				return response ?? SyncResponse.Error("Failed to deserialize server response.");
+				Debug.Log($"[SyncService] Server response: Success: {response.Success} with message: {response.Message}");
+				return response ?? SyncResponse.Fail("Failed to deserialize server response.");
 			}
 			catch (Exception e)
 			{
 				Debug.LogError($"[SyncService] Failed to read server response: {e.Message}");
-				return SyncResponse.Error(e.Message);
+				return SyncResponse.Fail(e.Message);
+			}
+		}
+
+		public async Task<FetchResponse> FetchAsync()
+		{
+			// Derives the state URL by replacing /sync with /state
+			string stateUrl = _serverUrl.Replace("/sync", "/state");
+
+			using var www = UnityWebRequest.Get(stateUrl);
+			var operation = www.SendWebRequest();
+
+			while (!operation.isDone)
+			{
+				await Task.Delay(10);
+			}
+
+			if (www.result == UnityWebRequest.Result.ConnectionError || www.result == UnityWebRequest.Result.ProtocolError)
+			{
+				Debug.LogError($"[SyncService] Fetch state error: {www.error}");
+				return FetchResponse.Fail(www.error);
+			}
+
+			try
+			{
+				var responseText = www.downloadHandler.text;
+				// Deserialize the dictionary returned by the StateController
+				var response = _serializer.Deserialize<FetchResponse>(responseText);
+				return response ?? FetchResponse.Fail("Failed to deserialize server response.");
+			}
+			catch (Exception e)
+			{
+				Debug.LogError($"[SyncService] Failed to parse state from server: {e.Message}");
+				return FetchResponse.Fail(e.Message);
 			}
 		}
 	}

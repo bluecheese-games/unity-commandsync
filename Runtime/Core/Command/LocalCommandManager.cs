@@ -5,7 +5,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -15,11 +14,14 @@ namespace BlueCheese.LocalCommands.Core
 
 	public class LocalCommandManager
 	{
+		private const string CommandHistoryPrefKey = "LocalCommand_History";
+
 		private readonly IDataManager _dataManager;
 		private readonly ILogger _logger;
 		private readonly IConfig _config;
 		private readonly ITimeProvider _timeProvider;
-		private readonly ICommandSyncService _syncService;
+		private readonly ISyncService _syncService;
+		private readonly IDataStorage _commandsDataStorage; // Separate data storage for the command history, so that it can be managed independently from the user data storage
 
 		private readonly Dictionary<string, CommandDef> _definitions = new(); // Registered command definitions, keyed by command name
 		private readonly CommandHistory _history = new(); // History of executed commands that have updated the user data, to be processed later
@@ -30,14 +32,15 @@ namespace BlueCheese.LocalCommands.Core
 
 		public IEnumerable<Type> UpdatedDataTypes => _history.UpdatedData;
 
-		public LocalCommandManager(IDataManager dataManager, ILogger logger, IConfig config, ITimeProvider timeProvider, ICommandSyncService syncService = null)
+		public LocalCommandManager(IDataManager dataManager, ILogger logger, IConfig config, ITimeProvider timeProvider, IDataStorage commandsDataStorage, ISyncService syncService = null)
 		{
 			_dataManager = dataManager;
 			_logger = logger ?? new NullLogger();
 			_config = config ?? new Config();
 			_timeProvider = timeProvider ?? new TimeProvider();
 			_syncService = syncService;
-			_history = _dataManager.Get(new CommandHistory());
+			_commandsDataStorage = commandsDataStorage ?? new InMemoryDataStorage();
+			_history = LoadHistory();
 		}
 
 		public void RegisterCommands(Assembly assembly)
@@ -87,6 +90,32 @@ namespace BlueCheese.LocalCommands.Core
 			_definitions[commandName] = commandInfo;
 		}
 
+		public async Task LoadData()
+		{
+			// If there are commands in the history, use the local data as the source of truth
+			if (_history.Queue.Count > 0)
+			{
+				_logger.Log($"Loaded command history with {_history.Queue.Count} commands.");
+				return;
+			}
+
+			_logger.Log($"No command history found, loading full state from sync service.");
+
+			// If not, we need to fetch the full state from the sync service and import it into the data manager
+			var response = await _syncService.FetchAsync();
+			if (response.Success)
+			{
+				_dataManager.ImportState(response.Data);
+				_logger.Log($"Full state loaded and imported into data manager.");
+			}
+			else
+			{
+				_logger.LogError($"Failed to fetch full state from sync service: {response.Message}");
+				_logger.Log("If there is data in the local data storage, it will be used as the source of truth, and we swith to Offline mode.");
+				Mode = SyncMode.Offline;
+			}
+		}
+
 		public void ExecuteCommand(string commandName, object args) => ExecuteCommandImpl(Guid.NewGuid(), commandName, args);
 
 		public void ExecuteCommand(string commandName) => ExecuteCommandImpl(Guid.NewGuid(), commandName, null);
@@ -95,9 +124,9 @@ namespace BlueCheese.LocalCommands.Core
 
 		public void ExecuteCommand(Action<Context> command) => ExecuteCommandImpl(Guid.NewGuid(), command.Method.Name, null);
 
-		public void ReplayCommand(CommandCall call) => ExecuteCommandImpl(call.Id, call.CommandName, call.Args);
+		public void ReplayCommand(CommandCall call) => ExecuteCommandImpl(call.Id, call.CommandName, call.Args, saveCommand: false);
 
-		public void ExecuteCommandImpl(Guid commandId, string commandName, object args)
+		public void ExecuteCommandImpl(Guid commandId, string commandName, object args, bool saveCommand = true)
 		{
 			// Look up the command definition
 			if (!_definitions.TryGetValue(commandName, out var commandDef))
@@ -135,35 +164,39 @@ namespace BlueCheese.LocalCommands.Core
 			{
 				// Flush the data storage to ensure that the updated data is saved before the next command call is executed.
 				var updatedDataTypes = _dataManager.Flush();
+				SaveUpdatedDataTypes(updatedDataTypes);
 
 				// If the user data was updated, we need to save this command call so that it can be processed later.
-				SaveToHistory(commandId, commandName, args, updatedDataTypes);
+				if (saveCommand)
+				{
+					EnqueueCommandCall(commandId, commandName, args);
+					_logger.Log($"Command '{commandName}' executed and data was updated. Call has been enqueued.");
+				}
 
-				_logger.Log($"Command '{commandName}' executed and data was updated. Call has been enqueued.");
+				SaveHistory(_history);
 			}
 		}
-		private void SaveToHistory(Guid commandId, string commandName, object args, IEnumerable<Type> updatedDataTypes)
-		{
-			if (Mode == SyncMode.Offline)
-			{
-				_logger.Log($"Command '{commandName}' executed in Offline mode, so it will not be saved to the history for later processing.");
-				return;
-			}
 
-			// Enqueue the command call with its arguments and a timestamp
-			_history.Enqueue(new CommandCall
+		private void EnqueueCommandCall(Guid commandId, string commandName, object args)
+		{
+			var call = new CommandCall
 			{
 				Id = commandId,
 				CommandName = commandName,
 				Args = args,
-				Timestamp = _timeProvider.UtcNow.ToUnixTimeMilliseconds()
-			});
+				Timestamp = _timeProvider.UtcNow.ToUnixTimeMilliseconds(),
+				ConfigVersion = _config.Version,
+			};
 
-			// Track the types of data that were updated by this command, so that when processing the history later, we know which data types need to be synced with the server.
-			_history.UpdatedData.UnionWith(updatedDataTypes);
+			_history.Enqueue(call);
+		}
 
-			// Save the updated call queue to storage so that it can be processed later
-			_dataManager.Set(_history);
+		private void SaveUpdatedDataTypes(IEnumerable<Type> updatedDataTypes)
+		{
+			foreach (var type in updatedDataTypes)
+			{
+				_history.UpdatedData.Add(type);
+			}
 		}
 
 		public async Task Sync()
@@ -187,25 +220,24 @@ namespace BlueCheese.LocalCommands.Core
 			}
 
 			var commands = _history.ToArray();
-			var dataTypes = _history.UpdatedData.Except(new[] { typeof(CommandHistory) }).ToArray();
-			var clientStateHash = _dataManager.GetStateHash(dataTypes);
+			var clientStateHash = _dataManager.GetStateHash(_history.UpdatedData);
 
 			var request = new SyncRequest
 			{
 				Commands = commands,
 				ClientStateHash = clientStateHash,
 			};
-			var response = await _syncService.SyncCommandsAsync(request);
+			var response = await _syncService.SyncAsync(request);
 
 			// If the sync is successful, clear the history so that the same commands won't be processed again.
-			if (response.Result == SyncResult.Success)
+			if (response.Success)
 			{
 				_logger.Log($"Sync successful, clearing command history.");
 				ClearHistory();
 			}
 			else
 			{
-				_logger.LogWarning($"Sync failed with result {response.Result}, message: {response.Message}. Command history will be retained for later retry.");
+				_logger.LogWarning($"Sync failed with message: {response.Message}. Command history will be retained for later retry.");
 			}
 		}
 
@@ -215,10 +247,24 @@ namespace BlueCheese.LocalCommands.Core
 			_history.Clear();
 
 			// Save the updated call queue to storage so that it can be processed later
-			_dataManager.Set(_history);
+			SaveHistory(_history);
+		}
 
-			// Flush the data storage to ensure that the cleared history is saved before the next command call is executed.
-			_dataManager.Flush();
+		private CommandHistory LoadHistory()
+		{
+			if (!_commandsDataStorage.TryLoad(CommandHistoryPrefKey, typeof(CommandHistory), out var historyObj) || historyObj == null)
+			{
+				return new CommandHistory();
+			}
+			else
+			{
+				return (CommandHistory)historyObj;
+			}
+		}
+
+		private void SaveHistory(CommandHistory history)
+		{
+			_commandsDataStorage.Save(CommandHistoryPrefKey, history, typeof(CommandHistory));
 		}
 
 		private struct CommandDef
@@ -269,7 +315,14 @@ namespace BlueCheese.LocalCommands.Core
 
 				if (args != null && ArgsType != null && !ArgsType.IsInstanceOfType(args))
 				{
-					throw new CommandArgumentException($"Command '{Name}' requires an argument of type {ArgsType}, but an argument of type {args.GetType()} was provided.");
+					if (args is Newtonsoft.Json.Linq.JObject jObj)
+					{
+						args = jObj.ToObject(ArgsType);
+					}
+					else
+					{
+						throw new CommandArgumentException($"Command '{Name}' requires an argument of type {ArgsType}, but an argument of type {args.GetType()} was provided.");
+					}
 				}
 
 				try
@@ -288,6 +341,7 @@ namespace BlueCheese.LocalCommands.Core
 		{
 			public Guid Id;
 			public long Timestamp;
+			public string ConfigVersion;
 			public string CommandName;
 			public object Args;
 
@@ -309,7 +363,11 @@ namespace BlueCheese.LocalCommands.Core
 
 			public CommandCall[] ToArray() => Queue.ToArray();
 
-			public void Clear() => Queue.Clear();
+			public void Clear()
+			{
+				Queue.Clear();
+				UpdatedData.Clear();
+			}
 		}
 
 		[Serializable]

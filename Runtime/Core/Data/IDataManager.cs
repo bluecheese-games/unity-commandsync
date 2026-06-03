@@ -30,5 +30,15 @@ namespace BlueCheese.LocalCommands.Core
 		/// Calculates a hash representing the current state of the data for the specified types. This can be used to detect changes in the data without needing to compare the actual values.
 		/// </summary>
 		int GetStateHash(IEnumerable<Type> keysToHash = null);
+
+		/// <summary>
+		/// Exports the requested data types into a serialized dictionary format for network transfer.
+		/// </summary>
+		Dictionary<string, string> ExportState(IEnumerable<Type> types);
+
+		/// <summary>
+		/// Imports a full state dictionary from the server, overwriting local storage and clearing the cache.
+		/// </summary>
+		void ImportState(Dictionary<string, string> serializedState);
 	}
 }
