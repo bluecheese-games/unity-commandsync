@@ -4,6 +4,7 @@
 
 using BlueCheese.LocalCommands.Core;
 using NUnit.Framework;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -73,6 +74,92 @@ namespace BlueCheese.LocalCommands.Tests
 			{
 				return Task.FromResult(FetchResponse.Fail("Fetch failed"));
 			}
+		}
+	}
+
+	// Verifies that concurrent Sync() calls do not send the same commands twice.
+	[TestFixture]
+	public class SyncConcurrencyTests
+	{
+		[Test]
+		public async Task Sync_CalledConcurrently_DoesNotSendCommandsTwice()
+		{
+			var storage = new FakeDataStorage();
+			var dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
+			var syncService = new CountingSyncService();
+
+			var manager = new LocalCommandManager(
+				dataManager, new FakeLogger(), Config.Create(),
+				new TimeProvider(), storage, syncService);
+			manager.RegisterCommands(Assembly.GetExecutingAssembly());
+
+			manager.ExecuteCommand(nameof(TestCommands.AddScore), new TestArgs { Value = 5 });
+
+			var t1 = manager.Sync();
+			var t2 = manager.Sync();
+			await Task.WhenAll(t1, t2);
+
+			Assert.AreEqual(1, syncService.SyncCallCount,
+				"Concurrent Sync() calls must only send commands once, not twice.");
+		}
+
+		private class CountingSyncService : ISyncService
+		{
+			public int SyncCallCount { get; private set; }
+
+			public Task<SyncResponse> SyncAsync(SyncRequest request)
+			{
+				SyncCallCount++;
+				return Task.FromResult(SyncResponse.Ok());
+			}
+
+			public Task<FetchResponse> FetchAsync() =>
+				Task.FromResult(FetchResponse.Ok(new Dictionary<string, string>()));
+		}
+	}
+
+	// Verifies that persisted CommandCall.Args are correctly deserialized after an app restart.
+	// When history is reloaded from storage, Args come back as JObject (Newtonsoft) instead of
+	// the original typed struct. ReplayCommand must handle this transparently.
+	// Verifies that persisted CommandCall.Args are correctly deserialized after an app restart.
+	// When history is reloaded from storage, Args come back as JObject (Newtonsoft) instead of
+	// the original typed struct. ReplayCommand must handle this transparently.
+	//
+	// Setup: the history storage is shared across sessions (it survives the restart),
+	// but the data storage is fresh in session 2 — replay is meant to reconstruct state
+	// from commands, so the starting point must be empty.
+	[TestFixture]
+	public class ArgsPersistenceTests
+	{
+		[Test]
+		public void ReplayCommand_AfterPersistence_CorrectlyDeserializesArgs()
+		{
+			var historyStorage = new FakeDataStorage(); // survives across sessions
+			var serializer = new NewtonsoftJsonSerializer();
+
+			// Session 1: execute a command — data and history are written
+			var dataManager1 = new DataManager(new FakeDataStorage(), serializer);
+			var manager1 = new LocalCommandManager(
+				dataManager1, new FakeLogger(), Config.Create(),
+				new TimeProvider(), historyStorage);
+			manager1.RegisterCommands(Assembly.GetExecutingAssembly());
+			manager1.ExecuteCommand(nameof(TestCommands.AddScore), new TestArgs { Value = 10 });
+
+			// Session 2: fresh data storage, same history storage (simulates restart with lost data)
+			// Args in the reloaded history may now be JObject instead of TestArgs
+			var dataManager2 = new DataManager(new FakeDataStorage(), serializer);
+			var manager2 = new LocalCommandManager(
+				dataManager2, new FakeLogger(), Config.Create(),
+				new TimeProvider(), historyStorage);
+			manager2.RegisterCommands(Assembly.GetExecutingAssembly());
+
+			var reloadedCall = manager2.History[0];
+
+			Assert.DoesNotThrow(() => manager2.ReplayCommand(reloadedCall),
+				"ReplayCommand must deserialize persisted args correctly regardless of their runtime type.");
+
+			Assert.AreEqual(10, dataManager2.Get<TestScoreData>().Score,
+				"The replayed command must produce the correct result on a fresh data state.");
 		}
 	}
 }

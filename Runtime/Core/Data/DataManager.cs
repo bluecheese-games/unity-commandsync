@@ -14,11 +14,13 @@ namespace BlueCheese.LocalCommands.Core
 	/// Data is stored in "boxes" that track whether they have been modified (dirty) and need to be saved back to storage.
 	/// Data is identified by its type, and the storage uses the full name of the type as the key for saving and loading data.
 	/// </summary>
-	public class DataManager : IDataManager
+	public class DataManager : IInternalDataManager
 	{
 		private readonly Dictionary<Type, object> _cache = new();
 		private readonly IDataStorage _storage;
 		private readonly ISerializer _serializer;
+
+		public IDataStorage Storage => _storage;
 
 		public DataManager(IDataStorage storage, ISerializer serializer)
 		{
@@ -30,13 +32,11 @@ namespace BlueCheese.LocalCommands.Core
 		{
 			var type = typeof(T);
 
-			// Check if we already have a cached box for this type. If so, return it.
 			if (_cache.TryGetValue(type, out var obj) && obj is DataBox<T> box)
 			{
 				return box;
 			}
 
-			// If not, we need to load the data from storage (or use the default value if it doesn't exist) and create a new box for it.
 			var value = Get(defaultValue);
 			var newBox = new DataBox<T> { Value = value };
 			_cache[type] = newBox;
@@ -74,10 +74,11 @@ namespace BlueCheese.LocalCommands.Core
 
 		public int GetStateHash(IEnumerable<Type> keysToHash = null)
 		{
-			keysToHash ??= _cache.Keys;
+			// Sort by FullName so the hash is deterministic regardless of Dictionary or caller order.
+			var keys = (keysToHash ?? _cache.Keys).OrderBy(t => t.FullName);
 
 			int hash = 17;
-			foreach (var type in keysToHash)
+			foreach (var type in keys)
 			{
 				if (_storage.TryLoad(type.FullName, type, out object value))
 				{
@@ -97,7 +98,6 @@ namespace BlueCheese.LocalCommands.Core
 			var export = new Dictionary<string, string>();
 			foreach (var type in types)
 			{
-				// Force a save to storage if it's currently dirty in cache
 				if (_cache.TryGetValue(type, out var obj) && obj is IDataBox box && box.IsDirty)
 				{
 					_storage.Save(type.FullName, box.UntypedValue);
@@ -117,23 +117,22 @@ namespace BlueCheese.LocalCommands.Core
 			foreach (var kvp in serializedState)
 			{
 				Type type = null;
-				// Find the type in the loaded assemblies
 				foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
 				{
 					type = assembly.GetType(kvp.Key);
 					if (type != null) break;
 				}
 
-				if (type != null)
+				if (type == null)
 				{
-					var deserialized = _serializer.Deserialize(kvp.Value, type);
-
-					// Save the new state directly into local storage
-					_storage.Save(kvp.Key, deserialized, type);
-
-					// Remove the old box from cache to force a fresh load from storage next time GetBox is called
-					_cache.Remove(type);
+					throw new InvalidOperationException(
+						$"ImportState failed: cannot resolve type '{kvp.Key}'. " +
+						"The type may have been renamed, removed, or its assembly is not loaded.");
 				}
+
+				var deserialized = _serializer.Deserialize(kvp.Value, type);
+				_storage.Save(kvp.Key, deserialized, type);
+				_cache.Remove(type);
 			}
 		}
 	}

@@ -7,6 +7,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace BlueCheese.LocalCommands.Core
@@ -16,7 +17,7 @@ namespace BlueCheese.LocalCommands.Core
 	{
 		private const string CommandHistoryPrefKey = "LocalCommand_History";
 
-		private readonly IDataManager _dataManager;
+		private readonly IInternalDataManager _dataManager;
 		private readonly ILogger _logger;
 		private readonly IConfig _config;
 		private readonly ITimeProvider _timeProvider;
@@ -25,6 +26,7 @@ namespace BlueCheese.LocalCommands.Core
 
 		private readonly Dictionary<string, CommandDef> _definitions = new(); // Registered command definitions, keyed by command name
 		private readonly CommandHistory _history = new(); // History of executed commands that have updated the user data, to be processed later
+		private int _syncInProgress = 0; // Interlocked flag — prevents concurrent Sync() calls
 
 		public SyncMode Mode { get; set; } = SyncMode.Online;
 
@@ -34,12 +36,23 @@ namespace BlueCheese.LocalCommands.Core
 
 		public LocalCommandManager(IDataManager dataManager, ILogger logger, IConfig config, ITimeProvider timeProvider, IDataStorage commandsDataStorage, ISyncService syncService = null)
 		{
-			_dataManager = dataManager;
+			_dataManager = dataManager as IInternalDataManager
+				?? throw new ArgumentException(
+					"dataManager must implement IInternalDataManager. Use DataManager or a compatible implementation.",
+					nameof(dataManager));
 			_logger = logger ?? new NullLogger();
 			_config = config ?? new Config();
 			_timeProvider = timeProvider ?? new TimeProvider();
 			_syncService = syncService;
 			_commandsDataStorage = commandsDataStorage ?? new InMemoryDataStorage();
+
+			if (ReferenceEquals(_commandsDataStorage, _dataManager.Storage))
+			{
+				_logger.LogWarning(
+					"LocalCommandManager: commandsDataStorage is the same instance as the DataManager's storage. " +
+					"Pass a separate IDataStorage for command history to avoid key collisions.");
+			}
+
 			_history = LoadHistory();
 		}
 
@@ -144,6 +157,13 @@ namespace BlueCheese.LocalCommands.Core
 				throw new CommandArgumentException($"Command '{commandName}' requires an argument of type {commandDef.ArgsType}, but no arguments were provided.");
 			}
 
+			// Deserialize JObject args back to the expected type when replaying from persisted history.
+			// Kept here in the infrastructure layer to avoid coupling CommandDef to Newtonsoft.
+			if (args is Newtonsoft.Json.Linq.JObject jObj && commandDef.ArgsType != null)
+			{
+				args = jObj.ToObject(commandDef.ArgsType);
+			}
+
 			// Create the context for this command call
 			var state = new ExecutionState();
 			var data = new Data(_dataManager, state);
@@ -200,6 +220,24 @@ namespace BlueCheese.LocalCommands.Core
 		}
 
 		public async Task Sync()
+		{
+			if (Interlocked.CompareExchange(ref _syncInProgress, 1, 0) != 0)
+			{
+				_logger.Log("Sync already in progress, skipping concurrent call.");
+				return;
+			}
+
+			try
+			{
+				await SyncInternal();
+			}
+			finally
+			{
+				Interlocked.Exchange(ref _syncInProgress, 0);
+			}
+		}
+
+		private async Task SyncInternal()
 		{
 			if (Mode == SyncMode.Offline)
 			{
@@ -315,14 +353,7 @@ namespace BlueCheese.LocalCommands.Core
 
 				if (args != null && ArgsType != null && !ArgsType.IsInstanceOfType(args))
 				{
-					if (args is Newtonsoft.Json.Linq.JObject jObj)
-					{
-						args = jObj.ToObject(ArgsType);
-					}
-					else
-					{
-						throw new CommandArgumentException($"Command '{Name}' requires an argument of type {ArgsType}, but an argument of type {args.GetType()} was provided.");
-					}
+					throw new CommandArgumentException($"Command '{Name}' requires an argument of type {ArgsType}, but an argument of type {args.GetType()} was provided.");
 				}
 
 				try

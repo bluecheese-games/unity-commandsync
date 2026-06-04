@@ -11,6 +11,59 @@ using System.Reflection;
 
 namespace BlueCheese.LocalCommands.Tests
 {
+	// Verifies that GetStateHash is deterministic regardless of type enumeration order.
+	[TestFixture]
+	public class HashDeterminismTests
+	{
+		private DataManager _dataManager;
+
+		[SetUp]
+		public void Setup()
+		{
+			_dataManager = new DataManager(new FakeDataStorage(), new NewtonsoftJsonSerializer());
+		}
+
+		[Test]
+		public void GetStateHash_WithNullArg_IsDeterministicAcrossMultipleCalls()
+		{
+			_dataManager.Set(new TestScoreData { Score = 42 });
+			_dataManager.Set(new ValueTypeArgs { Id = 7 });
+			_dataManager.Flush();
+
+			int hash1 = _dataManager.GetStateHash(null);
+			int hash2 = _dataManager.GetStateHash(null);
+
+			Assert.AreEqual(hash1, hash2,
+				"GetStateHash(null) must return the same value on consecutive calls for the same state.");
+		}
+
+		[Test]
+		public void GetStateHash_WithExplicitTypes_IsDeterministicRegardlessOfOrder()
+		{
+			_dataManager.Set(new TestScoreData { Score = 10 });
+			_dataManager.Set(new ValueTypeArgs { Id = 5 });
+			_dataManager.Flush();
+
+			var order1 = new List<Type> { typeof(TestScoreData), typeof(ValueTypeArgs) };
+			var order2 = new List<Type> { typeof(ValueTypeArgs), typeof(TestScoreData) };
+
+			Assert.AreEqual(
+				_dataManager.GetStateHash(order1),
+				_dataManager.GetStateHash(order2),
+				"GetStateHash must produce the same hash regardless of the order of the input types.");
+		}
+
+		[Test]
+		public void GetStateHash_WithEmptyList_ReturnsSeedOnly()
+		{
+			_dataManager.Set(new TestScoreData { Score = 100 });
+			_dataManager.Flush();
+
+			Assert.AreEqual(17, _dataManager.GetStateHash(new List<Type>()),
+				"An empty type list should produce the initial seed value (17) — no data is included.");
+		}
+	}
+
 	[TestFixture]
 	public class DesyncPreventionTests
 	{

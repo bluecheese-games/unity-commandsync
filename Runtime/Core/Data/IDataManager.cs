@@ -16,11 +16,6 @@ namespace BlueCheese.LocalCommands.Core
 		void Set<T>(T data);
 
 		/// <summary>
-		/// Gets a reference to the data of type T wrapped in a DataBox. Modifying the Value property of the returned DataBox will update the stored data.
-		/// </summary>
-		DataBox<T> GetBox<T>(T defaultValue = default);
-
-		/// <summary>
 		/// Flushes any pending changes to the underlying storage.
 		/// Returns a list of types that were flushed, which can be used to trigger any necessary updates in the system for those types.
 		/// </summary>

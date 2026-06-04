@@ -8,10 +8,10 @@ namespace BlueCheese.LocalCommands.Core
 {
 	public readonly struct Data
 	{
-		private readonly IDataManager _dataManager;
+		private readonly IInternalDataManager _dataManager;
 		private readonly ExecutionState _executionState;
 
-		internal Data(IDataManager dataManager, ExecutionState executionState)
+		internal Data(IInternalDataManager dataManager, ExecutionState executionState)
 		{
 			_dataManager = dataManager;
 			_executionState = executionState;
