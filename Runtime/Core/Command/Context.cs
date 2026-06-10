@@ -13,7 +13,13 @@ namespace BlueCheese.LocalCommands.Core
 		public IRandomGenerator RNG { get; private set; }
 		public ExecutionState State { get; private set; }
 
-		internal Context(IConfig config, Data data, ILogger logger, ExecutionState state, ITimeProvider timeProvider, IRandomGenerator rng)
+		/// <summary>
+		/// Allows raising local events from within a command or event handler.
+		/// Events are dispatched after the current execution step completes.
+		/// </summary>
+		public IEventContext Events { get; private set; }
+
+		internal Context(IConfig config, Data data, ILogger logger, ExecutionState state, ITimeProvider timeProvider, IRandomGenerator rng, IEventContext events)
 		{
 			Config = config;
 			Data = data;
@@ -21,6 +27,7 @@ namespace BlueCheese.LocalCommands.Core
 			State = state;
 			RNG = rng;
 			Time = timeProvider;
+			Events = events;
 		}
 	}
 }

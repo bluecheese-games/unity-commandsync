@@ -25,6 +25,7 @@ namespace BlueCheese.LocalCommands.Core
 		private readonly IDataStorage _commandsDataStorage; // Separate data storage for the command history, so that it can be managed independently from the user data storage
 
 		private readonly Dictionary<string, CommandDef> _definitions = new(); // Registered command definitions, keyed by command name
+		private readonly Dictionary<Type, List<EventHandlerDef>> _eventHandlers = new(); // Event handler definitions, keyed by event payload type
 		private readonly CommandHistory _history = new(); // History of executed commands that have updated the user data, to be processed later
 		private int _syncInProgress = 0; // Interlocked flag — prevents concurrent Sync() calls
 
@@ -58,25 +59,47 @@ namespace BlueCheese.LocalCommands.Core
 
 		public void RegisterCommands(Assembly assembly)
 		{
-			foreach (var method in GetLocalCommandMethods(assembly))
-			{
-				RegisterCommand(method);
-			}
-		}
-
-		private IEnumerable<MethodInfo> GetLocalCommandMethods(Assembly assembly)
-		{
-			// Find all static methods that have the LocalCommandAttribute
+			// Find all static methods that have the LocalCommandAttribute or the LocalEventHandlerAttribute
 			foreach (var type in assembly.GetTypes())
 			{
 				foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
 				{
 					if (method.GetCustomAttribute<LocalCommandAttribute>() != null)
 					{
-						yield return method;
+						RegisterCommand(method);
+					}
+					else if (method.GetCustomAttribute<LocalEventHandlerAttribute>() != null)
+					{
+						RegisterEventHandler(method);
 					}
 				}
 			}
+		}
+
+		private void RegisterEventHandler(MethodInfo method)
+		{
+			var parameters = method.GetParameters();
+			if (parameters.Length != 2 || parameters[0].ParameterType != typeof(Context))
+			{
+				throw new CommandRegistrationException(
+					$"Event handler '{method.Name}' must have exactly two parameters: Context and the event payload struct.");
+			}
+
+			var eventType = parameters[1].ParameterType;
+			if (!eventType.IsValueType)
+			{
+				throw new CommandRegistrationException(
+					$"Event handler '{method.Name}': event payload type '{eventType.Name}' must be a struct.");
+			}
+
+			var handlerDef = new EventHandlerDef(method.Name, eventType, method);
+
+			if (!_eventHandlers.TryGetValue(eventType, out var handlers))
+			{
+				handlers = new List<EventHandlerDef>();
+				_eventHandlers[eventType] = handlers;
+			}
+			handlers.Add(handlerDef);
 		}
 
 		private void RegisterCommand(MethodInfo method)
@@ -169,7 +192,8 @@ namespace BlueCheese.LocalCommands.Core
 			var data = new Data(_dataManager, state);
 			var rng = new RandomGenerator();
 			rng.Init(commandId.GetHashCode()); // Initialize RNG with a seed derived from the command ID to ensure deterministic random values for the same command call
-			var context = new Context(_config, data, _logger, state, _timeProvider, rng);
+			var eventContext = new EventContext();
+			var context = new Context(_config, data, _logger, state, _timeProvider, rng, eventContext);
 
 			// Execute the command
 			commandDef.Execute(context, args);
@@ -179,6 +203,9 @@ namespace BlueCheese.LocalCommands.Core
 				_logger.LogWarning($"Command '{commandName}' execution failed: {state.FailureMessage}");
 				return;
 			}
+
+			// Dispatch any events raised during command execution, cascading until the queue is empty
+			ProcessPendingEvents(commandId, context, eventContext, depth: 0);
 
 			if (state.DataHasBeenUpdated)
 			{
@@ -195,6 +222,76 @@ namespace BlueCheese.LocalCommands.Core
 
 				SaveHistory(_history);
 			}
+		}
+
+		private void ProcessPendingEvents(Guid rootCommandId, Context context, EventContext eventContext, int depth)
+		{
+			if (depth > EventContext.MaxCascadeDepth)
+			{
+				_logger.LogError(
+					$"Event cascade depth exceeded the maximum of {EventContext.MaxCascadeDepth}. " +
+					"Check for circular event handler chains. Remaining events will be discarded.");
+				// Drain the queue entirely so that all parent while-loops also terminate.
+				// Without this, the parent loop would keep dequeueing events added by the
+				// handler that triggered this depth-exceeded call, causing an infinite loop.
+				while (eventContext.TryDequeue(out _)) { }
+				return;
+			}
+
+			// Track occurrence index per event type to keep handler IDs deterministic
+			// across multiple raises of the same event type within one command execution.
+			var occurrenceCounters = new Dictionary<Type, int>();
+
+			while (eventContext.TryDequeue(out var pendingEvent))
+			{
+				if (!_eventHandlers.TryGetValue(pendingEvent.EventType, out var handlers))
+				{
+					continue; // No handlers registered for this event type
+				}
+
+				occurrenceCounters.TryGetValue(pendingEvent.EventType, out int occurrenceIndex);
+				occurrenceCounters[pendingEvent.EventType] = occurrenceIndex + 1;
+
+				foreach (var handler in handlers)
+				{
+					// Derive a deterministic ID from the root command ID, event type and occurrence index
+					// so that the handler's RNG seed is stable across replays.
+					var handlerId = DeriveHandlerId(rootCommandId, pendingEvent.EventType, occurrenceIndex);
+
+					var handlerRng = new RandomGenerator();
+					handlerRng.Init(handlerId.GetHashCode());
+
+					// Handlers share the same state and data as the triggering command
+					var handlerContext = new Context(
+						context.Config, context.Data, context.Logger,
+						context.State, context.Time, handlerRng, eventContext);
+
+					handler.Execute(handlerContext, pendingEvent.Payload);
+
+					if (context.State.Result == CommandExecutionResult.Failure)
+					{
+						_logger.LogWarning($"Event handler '{handler.Name}' failed: {context.State.FailureMessage}");
+						return;
+					}
+
+					// If the handler raised new events, process them at the next depth level
+					if (eventContext.HasPendingEvents)
+					{
+						ProcessPendingEvents(rootCommandId, handlerContext, eventContext, depth + 1);
+					}
+				}
+			}
+		}
+
+		private static Guid DeriveHandlerId(Guid rootCommandId, Type eventType, int occurrenceIndex)
+		{
+			// Combine the root command ID, event type full name and occurrence index into a
+			// deterministic hash so that replaying the same command always produces the same handler IDs.
+			var seed = HashUtility.GetDeterministicHashCode(
+				$"{rootCommandId}:{eventType.FullName}:{occurrenceIndex}");
+			var bytes = new byte[16];
+			BitConverter.GetBytes(seed).CopyTo(bytes, 0);
+			return new Guid(bytes);
 		}
 
 		private void EnqueueCommandCall(Guid commandId, string commandName, object args)
@@ -363,6 +460,39 @@ namespace BlueCheese.LocalCommands.Core
 				catch (Exception e)
 				{
 					context.State.Fail(message: $"An error occurred while executing command '{Name}': {e.Message}");
+				}
+			}
+		}
+
+		private struct EventHandlerDef
+		{
+			public string Name { get; }
+			public Type EventType { get; }
+
+			private readonly Action<Context, object> _cachedInvoke;
+
+			public EventHandlerDef(string name, Type eventType, MethodInfo executeMethod)
+			{
+				Name = name;
+				EventType = eventType;
+
+				// Compile an expression tree for fast invocation: (ctx, obj) => Handler(ctx, (TEvent)obj)
+				var contextParam = Expression.Parameter(typeof(Context), "context");
+				var payloadParam = Expression.Parameter(typeof(object), "payload");
+				var castPayload = Expression.Convert(payloadParam, eventType);
+				var call = Expression.Call(executeMethod, contextParam, castPayload);
+				_cachedInvoke = Expression.Lambda<Action<Context, object>>(call, contextParam, payloadParam).Compile();
+			}
+
+			public readonly void Execute(Context context, object payload)
+			{
+				try
+				{
+					_cachedInvoke(context, payload);
+				}
+				catch (Exception e)
+				{
+					context.State.Fail(message: $"An error occurred in event handler '{Name}': {e.Message}");
 				}
 			}
 		}
