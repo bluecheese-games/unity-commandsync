@@ -7,9 +7,10 @@ namespace BlueCheese.LocalCommands.Core
 	public interface IEventContext
 	{
 		/// <summary>
-		/// Raises a local event from within a command or an event handler.
-		/// The event will be dispatched to all registered handlers after the current
-		/// command finishes executing, before the data is flushed to storage.
+		/// Queues an event to be dispatched to external subscribers after the current
+		/// command (and all its signal handlers) have finished executing.
+		/// Use this to communicate outward from the LocalCommands module without
+		/// coupling commands to external systems.
 		/// </summary>
 		void Raise<T>(T eventData) where T : struct;
 	}

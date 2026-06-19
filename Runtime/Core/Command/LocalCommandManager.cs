@@ -25,7 +25,8 @@ namespace BlueCheese.LocalCommands.Core
 		private readonly IDataStorage _commandsDataStorage; // Separate data storage for the command history, so that it can be managed independently from the user data storage
 
 		private readonly Dictionary<string, CommandDef> _definitions = new(); // Registered command definitions, keyed by command name
-		private readonly Dictionary<Type, List<EventHandlerDef>> _eventHandlers = new(); // Event handler definitions, keyed by event payload type
+		private readonly Dictionary<Type, List<SignalHandlerDef>> _signalHandlers = new(); // Signal handler definitions, keyed by signal payload type
+		private readonly Dictionary<Type, Dictionary<Delegate, Action<object>>> _eventSubscribers = new(); // External event subscribers, keyed by event type
 		private readonly CommandHistory _history = new(); // History of executed commands that have updated the user data, to be processed later
 		private int _syncInProgress = 0; // Interlocked flag — prevents concurrent Sync() calls
 
@@ -59,7 +60,7 @@ namespace BlueCheese.LocalCommands.Core
 
 		public void RegisterCommands(Assembly assembly)
 		{
-			// Find all static methods that have the LocalCommandAttribute or the LocalEventHandlerAttribute
+			// Find all static methods that have the LocalCommandAttribute or the LocalSignalHandlerAttribute
 			foreach (var type in assembly.GetTypes())
 			{
 				foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
@@ -68,38 +69,67 @@ namespace BlueCheese.LocalCommands.Core
 					{
 						RegisterCommand(method);
 					}
-					else if (method.GetCustomAttribute<LocalEventHandlerAttribute>() != null)
+					else if (method.GetCustomAttribute<LocalSignalHandlerAttribute>() != null)
 					{
-						RegisterEventHandler(method);
+						RegisterSignalHandler(method);
 					}
 				}
 			}
 		}
 
-		private void RegisterEventHandler(MethodInfo method)
+		private void RegisterSignalHandler(MethodInfo method)
 		{
 			var parameters = method.GetParameters();
 			if (parameters.Length != 2 || parameters[0].ParameterType != typeof(Context))
 			{
 				throw new CommandRegistrationException(
-					$"Event handler '{method.Name}' must have exactly two parameters: Context and the event payload struct.");
+					$"Signal handler '{method.Name}' must have exactly two parameters: Context and the signal payload struct.");
 			}
 
-			var eventType = parameters[1].ParameterType;
-			if (!eventType.IsValueType)
+			var signalType = parameters[1].ParameterType;
+			if (!signalType.IsValueType)
 			{
 				throw new CommandRegistrationException(
-					$"Event handler '{method.Name}': event payload type '{eventType.Name}' must be a struct.");
+					$"Signal handler '{method.Name}': signal payload type '{signalType.Name}' must be a struct.");
 			}
 
-			var handlerDef = new EventHandlerDef(method.Name, eventType, method);
+			var attr = method.GetCustomAttribute<LocalSignalHandlerAttribute>();
+			var handlerDef = new SignalHandlerDef(method.Name, signalType, attr.Priority, method);
 
-			if (!_eventHandlers.TryGetValue(eventType, out var handlers))
+			if (!_signalHandlers.TryGetValue(signalType, out var handlers))
 			{
-				handlers = new List<EventHandlerDef>();
-				_eventHandlers[eventType] = handlers;
+				handlers = new List<SignalHandlerDef>();
+				_signalHandlers[signalType] = handlers;
 			}
 			handlers.Add(handlerDef);
+			// Keep the list sorted descending so highest-priority handlers execute first
+			handlers.Sort((a, b) => b.Priority.CompareTo(a.Priority));
+		}
+
+		/// <summary>
+		/// Subscribes to external events of type <typeparamref name="T"/> raised by commands via <c>ctx.Events.Raise</c>.
+		/// Handlers are invoked after the command and all its signal handlers have completed.
+		/// </summary>
+		public void On<T>(Action<T> handler) where T : struct
+		{
+			var eventType = typeof(T);
+			if (!_eventSubscribers.TryGetValue(eventType, out var subscribers))
+			{
+				subscribers = new Dictionary<Delegate, Action<object>>();
+				_eventSubscribers[eventType] = subscribers;
+			}
+			subscribers[handler] = payload => handler((T)payload);
+		}
+
+		/// <summary>
+		/// Unsubscribes a previously registered external event handler.
+		/// </summary>
+		public void Off<T>(Action<T> handler) where T : struct
+		{
+			if (_eventSubscribers.TryGetValue(typeof(T), out var subscribers))
+			{
+				subscribers.Remove(handler);
+			}
 		}
 
 		private void RegisterCommand(MethodInfo method)
@@ -192,8 +222,10 @@ namespace BlueCheese.LocalCommands.Core
 			var data = new Data(_dataManager, state);
 			var rng = new RandomGenerator();
 			rng.Init(commandId.GetHashCode()); // Initialize RNG with a seed derived from the command ID to ensure deterministic random values for the same command call
+			var occurrenceCounters = new Dictionary<Type, int>();
 			var eventContext = new EventContext();
-			var context = new Context(_config, data, _logger, state, _timeProvider, rng, eventContext);
+			var signalContext = CreateSignalContext(commandId, data, state, occurrenceCounters, eventContext);
+			var context = new Context(_config, data, _logger, state, _timeProvider, rng, signalContext, eventContext);
 
 			// Execute the command
 			commandDef.Execute(context, args);
@@ -204,8 +236,8 @@ namespace BlueCheese.LocalCommands.Core
 				return;
 			}
 
-			// Dispatch any events raised during command execution, cascading until the queue is empty
-			ProcessPendingEvents(commandId, context, eventContext, depth: 0);
+			// Dispatch any external events raised during command execution to registered subscribers
+			DispatchExternalEvents(eventContext);
 
 			if (state.DataHasBeenUpdated)
 			{
@@ -224,71 +256,93 @@ namespace BlueCheese.LocalCommands.Core
 			}
 		}
 
-		private void ProcessPendingEvents(Guid rootCommandId, Context context, EventContext eventContext, int depth)
+		private SignalContext CreateSignalContext(
+			Guid rootCommandId,
+			Data data,
+			ExecutionState state,
+			Dictionary<Type, int> occurrenceCounters,
+			EventContext eventContext)
 		{
-			if (depth > EventContext.MaxCascadeDepth)
+			return new SignalContext((signalType, payload) =>
+				DispatchSignal(rootCommandId, data, state, occurrenceCounters, eventContext, signalType, payload, depth: 0));
+		}
+
+		private void DispatchSignal(
+			Guid rootCommandId,
+			Data data,
+			ExecutionState state,
+			Dictionary<Type, int> occurrenceCounters,
+			EventContext eventContext,
+			Type signalType,
+			object payload,
+			int depth)
+		{
+			if (depth > SignalContext.MaxCascadeDepth)
 			{
 				_logger.LogError(
-					$"Event cascade depth exceeded the maximum of {EventContext.MaxCascadeDepth}. " +
-					"Check for circular event handler chains. Remaining events will be discarded.");
-				// Drain the queue entirely so that all parent while-loops also terminate.
-				// Without this, the parent loop would keep dequeueing events added by the
-				// handler that triggered this depth-exceeded call, causing an infinite loop.
-				while (eventContext.TryDequeue(out _)) { }
+					$"Signal cascade depth exceeded the maximum of {SignalContext.MaxCascadeDepth}. " +
+					"Check for circular signal handler chains.");
 				return;
 			}
 
-			// Track occurrence index per event type to keep handler IDs deterministic
-			// across multiple raises of the same event type within one command execution.
-			var occurrenceCounters = new Dictionary<Type, int>();
-
-			while (eventContext.TryDequeue(out var pendingEvent))
+			if (!_signalHandlers.TryGetValue(signalType, out var handlers))
 			{
-				if (!_eventHandlers.TryGetValue(pendingEvent.EventType, out var handlers))
+				return; // No handlers registered for this signal type
+			}
+
+			occurrenceCounters.TryGetValue(signalType, out int occurrenceIndex);
+			occurrenceCounters[signalType] = occurrenceIndex + 1;
+
+			foreach (var handler in handlers)
+			{
+				// Derive a deterministic ID from the root command ID, signal type and occurrence index
+				// so that the handler's RNG seed is stable across replays.
+				var handlerId = DeriveHandlerId(rootCommandId, signalType, occurrenceIndex);
+
+				var handlerRng = new RandomGenerator();
+				handlerRng.Init(handlerId.GetHashCode());
+
+				// Each handler level gets its own SignalContext so the depth counter advances correctly
+				var handlerSignalContext = new SignalContext((nestedSignalType, nestedPayload) =>
+					DispatchSignal(rootCommandId, data, state, occurrenceCounters, eventContext, nestedSignalType, nestedPayload, depth + 1));
+
+				// Handlers share the same state and data as the triggering command
+				var handlerContext = new Context(
+					_config, data, _logger,
+					state, _timeProvider, handlerRng, handlerSignalContext, eventContext);
+
+				handler.Execute(handlerContext, payload);
+
+				if (state.Result == CommandExecutionResult.Failure)
 				{
-					continue; // No handlers registered for this event type
-				}
-
-				occurrenceCounters.TryGetValue(pendingEvent.EventType, out int occurrenceIndex);
-				occurrenceCounters[pendingEvent.EventType] = occurrenceIndex + 1;
-
-				foreach (var handler in handlers)
-				{
-					// Derive a deterministic ID from the root command ID, event type and occurrence index
-					// so that the handler's RNG seed is stable across replays.
-					var handlerId = DeriveHandlerId(rootCommandId, pendingEvent.EventType, occurrenceIndex);
-
-					var handlerRng = new RandomGenerator();
-					handlerRng.Init(handlerId.GetHashCode());
-
-					// Handlers share the same state and data as the triggering command
-					var handlerContext = new Context(
-						context.Config, context.Data, context.Logger,
-						context.State, context.Time, handlerRng, eventContext);
-
-					handler.Execute(handlerContext, pendingEvent.Payload);
-
-					if (context.State.Result == CommandExecutionResult.Failure)
-					{
-						_logger.LogWarning($"Event handler '{handler.Name}' failed: {context.State.FailureMessage}");
-						return;
-					}
-
-					// If the handler raised new events, process them at the next depth level
-					if (eventContext.HasPendingEvents)
-					{
-						ProcessPendingEvents(rootCommandId, handlerContext, eventContext, depth + 1);
-					}
+					_logger.LogWarning($"Signal handler '{handler.Name}' failed: {state.FailureMessage}");
+					return;
 				}
 			}
 		}
 
-		private static Guid DeriveHandlerId(Guid rootCommandId, Type eventType, int occurrenceIndex)
+		private void DispatchExternalEvents(EventContext eventContext)
 		{
-			// Combine the root command ID, event type full name and occurrence index into a
+			while (eventContext.TryDequeue(out var pendingEvent))
+			{
+				if (!_eventSubscribers.TryGetValue(pendingEvent.EventType, out var subscribers))
+				{
+					continue; // No subscribers registered for this event type
+				}
+
+				foreach (var subscriber in subscribers.Values)
+				{
+					subscriber(pendingEvent.Payload);
+				}
+			}
+		}
+
+		private static Guid DeriveHandlerId(Guid rootCommandId, Type signalType, int occurrenceIndex)
+		{
+			// Combine the root command ID, signal type full name and occurrence index into a
 			// deterministic hash so that replaying the same command always produces the same handler IDs.
 			var seed = HashUtility.GetDeterministicHashCode(
-				$"{rootCommandId}:{eventType.FullName}:{occurrenceIndex}");
+				$"{rootCommandId}:{signalType.FullName}:{occurrenceIndex}");
 			var bytes = new byte[16];
 			BitConverter.GetBytes(seed).CopyTo(bytes, 0);
 			return new Guid(bytes);
@@ -464,22 +518,24 @@ namespace BlueCheese.LocalCommands.Core
 			}
 		}
 
-		private struct EventHandlerDef
+		private struct SignalHandlerDef
 		{
 			public string Name { get; }
-			public Type EventType { get; }
+			public Type SignalType { get; }
+			public int Priority { get; }
 
 			private readonly Action<Context, object> _cachedInvoke;
 
-			public EventHandlerDef(string name, Type eventType, MethodInfo executeMethod)
+			public SignalHandlerDef(string name, Type signalType, int priority, MethodInfo executeMethod)
 			{
 				Name = name;
-				EventType = eventType;
+				SignalType = signalType;
+				Priority = priority;
 
-				// Compile an expression tree for fast invocation: (ctx, obj) => Handler(ctx, (TEvent)obj)
+				// Compile an expression tree for fast invocation: (ctx, obj) => Handler(ctx, (TSignal)obj)
 				var contextParam = Expression.Parameter(typeof(Context), "context");
 				var payloadParam = Expression.Parameter(typeof(object), "payload");
-				var castPayload = Expression.Convert(payloadParam, eventType);
+				var castPayload = Expression.Convert(payloadParam, signalType);
 				var call = Expression.Call(executeMethod, contextParam, castPayload);
 				_cachedInvoke = Expression.Lambda<Action<Context, object>>(call, contextParam, payloadParam).Compile();
 			}
@@ -492,7 +548,7 @@ namespace BlueCheese.LocalCommands.Core
 				}
 				catch (Exception e)
 				{
-					context.State.Fail(message: $"An error occurred in event handler '{Name}': {e.Message}");
+					context.State.Fail(message: $"An error occurred in signal handler '{Name}': {e.Message}");
 				}
 			}
 		}

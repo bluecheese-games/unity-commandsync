@@ -7,7 +7,8 @@ using System;
 namespace BlueCheese.LocalCommands.Core
 {
 	/// <summary>
-	/// Represents an event raised during a command execution, waiting to be dispatched.
+	/// Represents an external event queued during command execution, waiting to be
+	/// dispatched to subscribers after execution completes.
 	/// </summary>
 	internal readonly struct PendingEvent
 	{

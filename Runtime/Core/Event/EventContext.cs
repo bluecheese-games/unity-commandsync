@@ -7,17 +7,12 @@ using System.Collections.Generic;
 namespace BlueCheese.LocalCommands.Core
 {
 	/// <summary>
-	/// Collects events raised during a command or handler execution.
-	/// The LocalCommandManager drains this queue after each execution step.
+	/// Collects external events raised during a command execution.
+	/// The LocalCommandManager drains this queue after the command and all its
+	/// signal handlers have completed, dispatching each event to registered subscribers.
 	/// </summary>
 	internal class EventContext : IEventContext
 	{
-		/// <summary>
-		/// Maximum number of cascading event handler levels allowed during a single command execution.
-		/// Prevents infinite loops when handlers raise events that trigger other handlers.
-		/// </summary>
-		public const int MaxCascadeDepth = 8;
-
 		private readonly Queue<PendingEvent> _pendingEvents = new();
 
 		public bool HasPendingEvents => _pendingEvents.Count > 0;

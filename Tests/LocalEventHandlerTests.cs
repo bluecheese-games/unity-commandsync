@@ -2,14 +2,15 @@
 // Copyright (c) 2026 BlueCheese Games All rights reserved
 //
 
+using System;
+using System.Reflection;
 using BlueCheese.LocalCommands.Core;
 using NUnit.Framework;
-using System.Reflection;
 
 namespace BlueCheese.LocalCommands.Tests
 {
 	[TestFixture]
-	public class LocalEventHandlerTests
+	public class LocalSignalHandlerTests
 	{
 		private LocalCommandManager _manager;
 		private DataManager _dataManager;
@@ -26,86 +27,73 @@ namespace BlueCheese.LocalCommands.Tests
 		}
 
 		[Test]
-		public void EventHandler_IsCalledAfterCommandRaisesEvent()
+		public void SignalHandler_IsCalledDuringCommandExecution()
 		{
-			_manager.ExecuteCommand(nameof(EventTestCommands.GainXp), new XpArgs { Amount = 50 });
+			_manager.ExecuteCommand(nameof(SignalTestCommands.GainXp), new SignalXpArgs { Amount = 50 });
 
-			// XpGainedEvent should trigger OnXpGained, which increments EventsFired
-			Assert.AreEqual(1, _dataManager.Get<EventCounterData>().Count,
-				"Event handler must be called once when the command raises one event.");
+			Assert.AreEqual(1, _dataManager.Get<SignalCounterData>().Count,
+				"Signal handler must be called once when the command sends one signal.");
 		}
 
 		[Test]
-		public void EventHandler_ReceivesCorrectPayload()
+		public void SignalHandler_ReceivesCorrectPayload()
 		{
-			_manager.ExecuteCommand(nameof(EventTestCommands.GainXp), new XpArgs { Amount = 75 });
+			_manager.ExecuteCommand(nameof(SignalTestCommands.GainXp), new SignalXpArgs { Amount = 75 });
 
-			// OnXpGained copies the amount into LastEventAmount
-			Assert.AreEqual(75, _dataManager.Get<EventCounterData>().LastEventAmount,
-				"Event handler must receive the exact payload raised by the command.");
+			Assert.AreEqual(75, _dataManager.Get<SignalCounterData>().LastAmount,
+				"Signal handler must receive the exact payload sent by the command.");
 		}
 
 		[Test]
-		public void EventHandler_CanModifyData()
+		public void SignalHandler_CanChainSignals()
 		{
-			_manager.ExecuteCommand(nameof(EventTestCommands.GainXp), new XpArgs { Amount = 200 });
+			// GainXp(200) → XpGainedSignal → OnXpGained → LevelUpSignal → OnLevelUp
+			_manager.ExecuteCommand(nameof(SignalTestCommands.GainXp), new SignalXpArgs { Amount = 200 });
 
-			// Reaching 200 xp triggers OnLevelUp via a second event raised inside OnXpGained
-			Assert.AreEqual(1, _dataManager.Get<PlayerLevelData>().Level,
-				"An event handler that raises another event must trigger the downstream handler.");
+			Assert.AreEqual(1, _dataManager.Get<SignalCounterData>().Count, "XpGained handler called once.");
+			Assert.AreEqual(1, _dataManager.Get<SignalLevelData>().Level, "LevelUp handler called once.");
 		}
 
 		[Test]
-		public void EventHandler_CascadingEvents_AreAllProcessed()
+		public void SignalHandler_CommandIsEnqueuedInHistory_EvenWhenHandlerModifiesData()
 		{
-			// GainXp(200) → XpGainedEvent → OnXpGained → LevelUpEvent → OnLevelUp
-			_manager.ExecuteCommand(nameof(EventTestCommands.GainXp), new XpArgs { Amount = 200 });
-
-			Assert.AreEqual(1, _dataManager.Get<EventCounterData>().Count, "XpGained handler called once.");
-			Assert.AreEqual(1, _dataManager.Get<PlayerLevelData>().Level, "LevelUp handler called once.");
-		}
-
-		[Test]
-		public void EventHandler_CommandIsEnqueuedInHistory_EvenWhenHandlerModifiesData()
-		{
-			_manager.ExecuteCommand(nameof(EventTestCommands.GainXp), new XpArgs { Amount = 50 });
+			_manager.ExecuteCommand(nameof(SignalTestCommands.GainXp), new SignalXpArgs { Amount = 50 });
 
 			// Only the root command should appear in history, not the handler
 			Assert.AreEqual(1, _manager.History.Count,
-				"Only the root command must be stored in history, not its event handlers.");
-			Assert.AreEqual(nameof(EventTestCommands.GainXp), _manager.History[0].CommandName,
+				"Only the root command must be stored in history, not its signal handlers.");
+			Assert.AreEqual(nameof(SignalTestCommands.GainXp), _manager.History[0].CommandName,
 				"The history entry must reference the originating command.");
 		}
 
 		[Test]
-		public void EventHandler_IsDeterministic_SameRngOnReplay()
+		public void SignalHandler_IsDeterministic_SameRngOnReplay()
 		{
-			// Execute and capture RNG output stored by the handler
-			_manager.ExecuteCommand(nameof(EventTestCommands.RollOnEvent));
-			int firstRoll = _dataManager.Get<RollData>().LastRoll;
+			_manager.ExecuteCommand(nameof(SignalTestCommands.RollOnSignal));
+			int firstRoll = _dataManager.Get<SignalRollData>().LastRoll;
 
-			// Reset data and replay
-			_dataManager.Set(new RollData());
+			// Reset data and replay with the same command ID to verify deterministic RNG
+			_dataManager.Set(new SignalRollData());
 			_dataManager.Flush();
 			_manager.ReplayCommand(_manager.History[0]);
-			int replayRoll = _dataManager.Get<RollData>().LastRoll;
+			int replayRoll = _dataManager.Get<SignalRollData>().LastRoll;
 
 			Assert.AreEqual(firstRoll, replayRoll,
-				"Event handler RNG must be deterministic: replay must produce the same values.");
+				"Signal handler RNG must be deterministic: replay must produce the same values.");
 		}
 
 		[Test]
-		public void EventHandler_MaxCascadeDepth_IsRespected()
+		public void SignalHandler_MaxCascadeDepth_IsRespected()
 		{
-			// InfiniteLoopCommand raises InfiniteLoopEvent whose handler raises the same event again.
-			// The cascade must stop at EventContext.MaxCascadeDepth without throwing or looping forever.
+			// InfiniteSignalLoop sends InfiniteLoopSignal whose handler sends the same signal.
+			// The cascade must stop at SignalContext.MaxCascadeDepth without throwing or looping forever.
 			var storage = new FakeDataStorage();
 			var dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
 			var logger = new FakeLogger();
 			var manager = new LocalCommandManager(dataManager, logger, Config.Create(), new TimeProvider(), storage);
 			manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
-			Assert.DoesNotThrow(() => manager.ExecuteCommand(nameof(EventTestCommands.TriggerInfiniteLoop)),
+			Assert.DoesNotThrow(() => manager.ExecuteCommand(nameof(SignalTestCommands.TriggerInfiniteSignalLoop)),
 				"Exceeding MaxCascadeDepth must not throw — it must log an error and stop gracefully.");
 
 			Assert.IsTrue(logger.Logs.Exists(l => l.Contains("cascade depth exceeded") || l.Contains("ERR:")),
@@ -113,24 +101,24 @@ namespace BlueCheese.LocalCommands.Tests
 		}
 
 		[Test]
-		public void RegisterCommands_InvalidHandlerSignature_Throws()
+		public void RegisterCommands_InvalidSignalHandlerSignature_Throws()
 		{
-			// A method without the required event payload parameter should fail at registration.
-			// RegisterEventHandler is private, so we invoke it via reflection — which wraps the
+			// A method without the required signal payload parameter should fail at registration.
+			// RegisterSignalHandler is private, so we invoke it via reflection — which wraps the
 			// exception in a TargetInvocationException. We unwrap it to verify the root cause.
 			var manager = new LocalCommandManager(
 				_dataManager, new FakeLogger(), Config.Create(),
 				new TimeProvider(), new FakeDataStorage());
 
-			var method = typeof(InvalidEventHandlers).GetMethod(
-				nameof(InvalidEventHandlers.BadHandler),
-				System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+			var method = typeof(InvalidSignalHandlers).GetMethod(
+				nameof(InvalidSignalHandlers.BadHandler),
+				BindingFlags.Public | BindingFlags.Static);
 
 			var registerMethod = typeof(LocalCommandManager).GetMethod(
-				"RegisterEventHandler",
-				System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+				"RegisterSignalHandler",
+				BindingFlags.NonPublic | BindingFlags.Instance);
 
-			var ex = Assert.Throws<System.Reflection.TargetInvocationException>(
+			var ex = Assert.Throws<TargetInvocationException>(
 				() => registerMethod.Invoke(manager, new object[] { method }));
 
 			Assert.IsInstanceOf<CommandRegistrationException>(ex.InnerException,
@@ -138,99 +126,288 @@ namespace BlueCheese.LocalCommands.Tests
 		}
 	}
 
-	// ---------------------------------------------------------------------------
-	// Data types used by event tests
-	// ---------------------------------------------------------------------------
-
-	public struct XpArgs { public int Amount; }
-
-	public struct XpGainedEvent { public int Amount; }
-
-	public struct LevelUpEvent { public int NewLevel; }
-
-	public struct InfiniteLoopEvent { }
-
-	public struct RollEvent { }
-
-	public struct EventCounterData
+	[TestFixture]
+	public class ExternalEventTests
 	{
-		public int Count;
-		public int LastEventAmount;
+		private LocalCommandManager _manager;
+		private DataManager _dataManager;
+
+		[SetUp]
+		public void Setup()
+		{
+			var storage = new FakeDataStorage();
+			_dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
+			_manager = new LocalCommandManager(
+				_dataManager, new FakeLogger(), Config.Create(),
+				new TimeProvider(), storage);
+			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
+		}
+
+		[Test]
+		public void ExternalEvent_SubscriberIsCalledAfterCommandExecution()
+		{
+			bool called = false;
+			_manager.On<ItemAddedEvent>(_ => called = true);
+
+			_manager.ExecuteCommand(nameof(ExternalEventTestCommands.AddItem));
+
+			Assert.IsTrue(called, "External event subscriber must be called after command execution.");
+		}
+
+		[Test]
+		public void ExternalEvent_ReceivesCorrectPayload()
+		{
+			ItemAddedEvent received = default;
+			_manager.On<ItemAddedEvent>(evt => received = evt);
+
+			_manager.ExecuteCommand(nameof(ExternalEventTestCommands.AddItem));
+
+			Assert.AreEqual(42, received.ItemId, "Subscriber must receive the exact payload raised by the command.");
+		}
+
+		[Test]
+		public void ExternalEvent_UnsubscribedHandlerIsNotCalled()
+		{
+			int callCount = 0;
+			Action<ItemAddedEvent> handler = _ => callCount++;
+
+			_manager.On<ItemAddedEvent>(handler);
+			_manager.Off<ItemAddedEvent>(handler);
+
+			_manager.ExecuteCommand(nameof(ExternalEventTestCommands.AddItem));
+
+			Assert.AreEqual(0, callCount, "Unsubscribed handler must not be called.");
+		}
+
+		[Test]
+		public void ExternalEvent_MultipleSubscribers_AllCalled()
+		{
+			int callCount = 0;
+			_manager.On<ItemAddedEvent>(_ => callCount++);
+			_manager.On<ItemAddedEvent>(_ => callCount++);
+
+			_manager.ExecuteCommand(nameof(ExternalEventTestCommands.AddItem));
+
+			Assert.AreEqual(2, callCount, "All registered subscribers must be called.");
+		}
+
+		[Test]
+		public void ExternalEvent_IsNotSavedInCommandHistory()
+		{
+			_manager.On<ItemAddedEvent>(_ => { });
+			_manager.ExecuteCommand(nameof(ExternalEventTestCommands.AddItem));
+
+			// The root command is in history; external event dispatch is transparent to the history
+			Assert.AreEqual(1, _manager.History.Count,
+				"Only the root command must be in history — external event dispatch is not tracked.");
+		}
 	}
 
-	public struct PlayerLevelData { public int Level; }
-
-	public struct RollData { public int LastRoll; }
-
 	// ---------------------------------------------------------------------------
-	// Commands and handlers used by event tests
+	// Signal types
 	// ---------------------------------------------------------------------------
 
-	public static class EventTestCommands
+	public struct SignalXpArgs { public int Amount; }
+	public struct XpGainedSignal { public int Amount; }
+	public struct LevelUpSignal { public int NewLevel; }
+	public struct InfiniteLoopSignal { }
+	public struct RollSignal { }
+	public struct PrioritySignal { }
+
+	// ---------------------------------------------------------------------------
+	// External event types
+	// ---------------------------------------------------------------------------
+
+	public struct ItemAddedEvent { public int ItemId; }
+
+	// ---------------------------------------------------------------------------
+	// Data types
+	// ---------------------------------------------------------------------------
+
+	public struct SignalCounterData { public int Count; public int LastAmount; }
+	public struct SignalLevelData { public int Level; }
+	public struct SignalRollData { public int LastRoll; }
+	public struct ItemInventoryData { public int Count; }
+	public struct PriorityOrderData { public int Value; }
+
+	// ---------------------------------------------------------------------------
+	// Commands
+	// ---------------------------------------------------------------------------
+
+	public static class SignalTestCommands
 	{
 		[LocalCommand]
-		public static void GainXp(Context ctx, XpArgs args)
+		public static void GainXp(Context ctx, SignalXpArgs args)
 		{
-			ctx.Events.Raise(new XpGainedEvent { Amount = args.Amount });
+			ctx.Signals.Send(new XpGainedSignal { Amount = args.Amount });
 		}
 
 		[LocalCommand]
-		public static void RollOnEvent(Context ctx)
+		public static void RollOnSignal(Context ctx)
 		{
-			ctx.Events.Raise(new RollEvent());
+			ctx.Signals.Send(new RollSignal());
 		}
 
 		[LocalCommand]
-		public static void TriggerInfiniteLoop(Context ctx)
+		public static void TriggerInfiniteSignalLoop(Context ctx)
 		{
-			ctx.Events.Raise(new InfiniteLoopEvent());
+			ctx.Signals.Send(new InfiniteLoopSignal());
+		}
+
+		[LocalCommand]
+		public static void SendPrioritySignal(Context ctx)
+		{
+			ctx.Signals.Send(new PrioritySignal());
 		}
 	}
 
-	public static class EventTestHandlers
+	public static class ExternalEventTestCommands
 	{
-		[LocalEventHandler]
-		public static void OnXpGained(Context ctx, XpGainedEvent evt)
+		[LocalCommand]
+		public static void AddItem(Context ctx)
 		{
-			ctx.Data.Update((ref EventCounterData d) =>
+			ctx.Data.Update((ref ItemInventoryData d) => d.Count++);
+			ctx.Events.Raise(new ItemAddedEvent { ItemId = 42 });
+		}
+	}
+
+	// ---------------------------------------------------------------------------
+	// Signal handlers
+	// ---------------------------------------------------------------------------
+
+	public static class SignalTestHandlers
+	{
+		[LocalSignalHandler]
+		public static void OnXpGained(Context ctx, XpGainedSignal signal)
+		{
+			ctx.Data.Update((ref SignalCounterData d) =>
 			{
 				d.Count++;
-				d.LastEventAmount = evt.Amount;
+				d.LastAmount = signal.Amount;
 			});
 
-			// Reaching 200 XP triggers a level up
-			if (evt.Amount >= 200)
+			if (signal.Amount >= 200)
 			{
-				ctx.Events.Raise(new LevelUpEvent { NewLevel = 1 });
+				ctx.Signals.Send(new LevelUpSignal { NewLevel = 1 });
 			}
 		}
 
-		[LocalEventHandler]
-		public static void OnLevelUp(Context ctx, LevelUpEvent evt)
+		[LocalSignalHandler]
+		public static void OnLevelUp(Context ctx, LevelUpSignal signal)
 		{
-			ctx.Data.Update((ref PlayerLevelData d) => d.Level = evt.NewLevel);
+			ctx.Data.Update((ref SignalLevelData d) => d.Level = signal.NewLevel);
 		}
 
-		[LocalEventHandler]
-		public static void OnRollEvent(Context ctx, RollEvent evt)
+		[LocalSignalHandler]
+		public static void OnRollSignal(Context ctx, RollSignal signal)
 		{
 			int roll = ctx.RNG.Next(1, 100);
-			ctx.Data.Update((ref RollData d) => d.LastRoll = roll);
+			ctx.Data.Update((ref SignalRollData d) => d.LastRoll = roll);
 		}
 
-		[LocalEventHandler]
-		public static void OnInfiniteLoop(Context ctx, InfiniteLoopEvent evt)
+		[LocalSignalHandler]
+		public static void OnInfiniteLoopSignal(Context ctx, InfiniteLoopSignal signal)
 		{
-			// Intentionally raises the same event to trigger depth protection
-			ctx.Events.Raise(new InfiniteLoopEvent());
+			// Intentionally sends the same signal to trigger the depth protection
+			ctx.Signals.Send(new InfiniteLoopSignal());
 		}
 	}
 
 	// Used to test invalid handler registration.
-	// No [LocalEventHandler] attribute here — the test registers it manually via reflection
+	// No [LocalSignalHandler] attribute here — the test registers it manually via reflection
 	// so it doesn't pollute the assembly-wide scan in Setup().
-	public static class InvalidEventHandlers
+	public static class InvalidSignalHandlers
 	{
-		public static void BadHandler(Context ctx) { } // missing event payload parameter
+		public static void BadHandler(Context ctx) { } // missing signal payload parameter
+	}
+
+	// ---------------------------------------------------------------------------
+	// Priority signal handlers — encoding trick: value = value*10 + handlerIndex
+	// Execution order (10, 5, 1): 0 → 1 → 12 → 123
+	// Wrong order     ( 1, 5,10): 0 → 3 → 32 → 321  (or other permutations)
+	// ---------------------------------------------------------------------------
+
+	public static class PrioritySignalHandlers
+	{
+		[LocalSignalHandler(10)]
+		public static void HandlerPrio10(Context ctx, PrioritySignal signal)
+		{
+			ctx.Data.Update((ref PriorityOrderData d) => d.Value = d.Value * 10 + 1);
+		}
+
+		[LocalSignalHandler(5)]
+		public static void HandlerPrio5(Context ctx, PrioritySignal signal)
+		{
+			ctx.Data.Update((ref PriorityOrderData d) => d.Value = d.Value * 10 + 2);
+		}
+
+		[LocalSignalHandler(1)]
+		public static void HandlerPrio1(Context ctx, PrioritySignal signal)
+		{
+			ctx.Data.Update((ref PriorityOrderData d) => d.Value = d.Value * 10 + 3);
+		}
+	}
+
+	// ---------------------------------------------------------------------------
+	// Priority tests
+	// ---------------------------------------------------------------------------
+
+	[TestFixture]
+	public class SignalPriorityTests
+	{
+		private LocalCommandManager _manager;
+		private DataManager _dataManager;
+
+		[SetUp]
+		public void Setup()
+		{
+			var storage = new FakeDataStorage();
+			_dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
+			_manager = new LocalCommandManager(
+				_dataManager, new FakeLogger(), Config.Create(),
+				new TimeProvider(), storage);
+			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
+		}
+
+		[Test]
+		public void SignalHandlers_AreCalledInDescendingPriorityOrder()
+		{
+			// Three handlers registered for PrioritySignal with priorities 10, 5, 1.
+			// Each appends a digit using value = value*10 + N so the result encodes call order:
+			//   prio 10 (N=1) then prio 5 (N=2) then prio 1 (N=3) → 0→1→12→123
+			_manager.ExecuteCommand(nameof(SignalTestCommands.SendPrioritySignal));
+
+			Assert.AreEqual(123, _dataManager.Get<PriorityOrderData>().Value,
+				"Handlers must execute in descending priority order (highest priority first).");
+		}
+
+		[Test]
+		public void LocalSignalHandlerAttribute_DefaultPriority_IsZero()
+		{
+			// Verify that the attribute's default priority value is 0 when not specified.
+			var method = typeof(SignalTestHandlers).GetMethod(
+				nameof(SignalTestHandlers.OnXpGained),
+				BindingFlags.Public | BindingFlags.Static);
+
+			var attr = method.GetCustomAttribute<LocalSignalHandlerAttribute>();
+
+			Assert.AreEqual(0, attr.Priority,
+				"A handler declared with [LocalSignalHandler] and no argument must have priority 0.");
+		}
+
+		[Test]
+		public void LocalSignalHandlerAttribute_ExplicitPriority_IsCorrectlyStored()
+		{
+			// Verify that the integer passed to [LocalSignalHandler(N)] is faithfully stored
+			// and retrievable — a prerequisite for the runtime sorting logic.
+			Func<string, LocalSignalHandlerAttribute> getAttr = methodName =>
+				typeof(PrioritySignalHandlers)
+					.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static)
+					.GetCustomAttribute<LocalSignalHandlerAttribute>();
+
+			Assert.AreEqual(10, getAttr(nameof(PrioritySignalHandlers.HandlerPrio10)).Priority);
+			Assert.AreEqual(5,  getAttr(nameof(PrioritySignalHandlers.HandlerPrio5)).Priority);
+			Assert.AreEqual(1,  getAttr(nameof(PrioritySignalHandlers.HandlerPrio1)).Priority);
+		}
 	}
 }

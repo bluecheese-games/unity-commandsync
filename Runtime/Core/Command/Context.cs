@@ -14,12 +14,18 @@ namespace BlueCheese.LocalCommands.Core
 		public ExecutionState State { get; private set; }
 
 		/// <summary>
-		/// Allows raising local events from within a command or event handler.
-		/// Events are dispatched after the current execution step completes.
+		/// Sends a signal synchronously to other commands within the LocalCommands module.
+		/// The signal handler executes immediately before this call returns.
+		/// </summary>
+		public ISignalContext Signals { get; private set; }
+
+		/// <summary>
+		/// Queues an external event to be dispatched to subscribers outside the module
+		/// after the current command and all its signal handlers have finished.
 		/// </summary>
 		public IEventContext Events { get; private set; }
 
-		internal Context(IConfig config, Data data, ILogger logger, ExecutionState state, ITimeProvider timeProvider, IRandomGenerator rng, IEventContext events)
+		internal Context(IConfig config, Data data, ILogger logger, ExecutionState state, ITimeProvider timeProvider, IRandomGenerator rng, ISignalContext signals, IEventContext events)
 		{
 			Config = config;
 			Data = data;
@@ -27,6 +33,7 @@ namespace BlueCheese.LocalCommands.Core
 			State = state;
 			RNG = rng;
 			Time = timeProvider;
+			Signals = signals;
 			Events = events;
 		}
 	}
