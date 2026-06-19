@@ -8,7 +8,5 @@ namespace BlueCheese.LocalCommands.Core
 	{
 		public bool Success { get; set; }
 		public string Message { get; set; }
-		public static Response Ok() => new() { Success = true, Message = "Ok" };
-		public static Response Fail(string message = null) => new() { Success = false, Message = message };
 	}
 }

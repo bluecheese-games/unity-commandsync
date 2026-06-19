@@ -1,0 +1,27 @@
+//
+// Copyright (c) 2026 BlueCheese Games All rights reserved
+//
+
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+
+namespace BlueCheese.LocalCommands.Core
+{
+	[Serializable]
+	public class CommandHistory
+	{
+		public ConcurrentQueue<CommandCall> Queue = new();
+		public HashSet<Type> UpdatedData = new();
+
+		public void Enqueue(CommandCall call) => Queue.Enqueue(call);
+
+		public CommandCall[] ToArray() => Queue.ToArray();
+
+		public void Clear()
+		{
+			Queue.Clear();
+			UpdatedData.Clear();
+		}
+	}
+}

@@ -6,12 +6,12 @@ using System.Collections.Generic;
 
 namespace BlueCheese.LocalCommands.Core
 {
-	public readonly struct Data
+	public readonly struct DataAccessor
 	{
 		private readonly IInternalDataManager _dataManager;
 		private readonly ExecutionState _executionState;
 
-		internal Data(IInternalDataManager dataManager, ExecutionState executionState)
+		internal DataAccessor(IInternalDataManager dataManager, ExecutionState executionState)
 		{
 			_dataManager = dataManager;
 			_executionState = executionState;

@@ -4,6 +4,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using System.Threading.Tasks;
 using BlueCheese.LocalCommands.Core;
 
@@ -43,8 +44,6 @@ namespace BlueCheese.LocalCommands.Tests
 			data = null;
 			return false;
 		}
-
-		public void Flush() { }
 	}
 
 	public class FakeLogger : ILogger
@@ -58,12 +57,12 @@ namespace BlueCheese.LocalCommands.Tests
 
 	public class FakeCommandSyncService : ISyncService
 	{
-		public Task<FetchResponse> FetchAsync()
+		public Task<FetchResponse> FetchAsync(CancellationToken cancellationToken = default)
 		{
 			return Task.FromResult(FetchResponse.Ok(new()));
 		}
 
-		public Task<SyncResponse> SyncAsync(SyncRequest request)
+		public Task<SyncResponse> SyncAsync(SyncRequest request, CancellationToken cancellationToken = default)
 		{
 			return Task.FromResult(SyncResponse.Ok());
 		}

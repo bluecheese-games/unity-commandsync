@@ -7,7 +7,6 @@ using NUnit.Framework;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using static BlueCheese.LocalCommands.Core.LocalCommandManager;
 
 namespace BlueCheese.LocalCommands.Tests
 {
@@ -87,7 +86,7 @@ namespace BlueCheese.LocalCommands.Tests
 			var dataManager = new DataManager(sharedStorage, new NewtonsoftJsonSerializer());
 			var manager = new LocalCommandManager(
 				dataManager, new FakeLogger(), Config.Create(),
-				new TimeProvider(), sharedStorage);
+				new SystemTimeProvider(), sharedStorage);
 			manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			manager.ExecuteCommand(nameof(TestCommands.AddScore), new TestArgs { Value = 7 });

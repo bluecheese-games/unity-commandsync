@@ -7,6 +7,7 @@ using NUnit.Framework;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace BlueCheese.LocalCommands.Tests
@@ -31,8 +32,8 @@ namespace BlueCheese.LocalCommands.Tests
 		public async Task Sync_WhenSuccessful_ClearsHistory()
 		{
 			// Arrange: Inject a fake sync service that always returns Success
-			var successSyncService = new FakeCommandSyncService(); // Returns SyncResult.Success by default
-			_manager = new LocalCommandManager(_dataManager, new FakeLogger(), _config, new TimeProvider(), _storage, successSyncService);
+			var successSyncService = new FakeCommandSyncService(); // Returns a successful SyncResponse by default
+			_manager = new LocalCommandManager(_dataManager, new FakeLogger(), _config, new SystemTimeProvider(), _storage, successSyncService);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			// Act: Execute a command to populate history, then sync
@@ -50,7 +51,7 @@ namespace BlueCheese.LocalCommands.Tests
 		{
 			// Arrange: Inject a custom fake sync service that returns Desync
 			var failingSyncService = new FailingCommandSyncService();
-			_manager = new LocalCommandManager(_dataManager, new FakeLogger(), _config, new TimeProvider(), _storage, failingSyncService);
+			_manager = new LocalCommandManager(_dataManager, new FakeLogger(), _config, new SystemTimeProvider(), _storage, failingSyncService);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			// Act: Execute a command and attempt to sync
@@ -65,12 +66,12 @@ namespace BlueCheese.LocalCommands.Tests
 		// A specific fake service for simulating failures
 		private class FailingCommandSyncService : ISyncService
 		{
-			public Task<SyncResponse> SyncAsync(SyncRequest request)
+			public Task<SyncResponse> SyncAsync(SyncRequest request, CancellationToken cancellationToken = default)
 			{
 				return Task.FromResult(SyncResponse.Fail("Desynchronized"));
 			}
 
-			public Task<FetchResponse> FetchAsync()
+			public Task<FetchResponse> FetchAsync(CancellationToken cancellationToken = default)
 			{
 				return Task.FromResult(FetchResponse.Fail("Fetch failed"));
 			}
@@ -90,7 +91,7 @@ namespace BlueCheese.LocalCommands.Tests
 
 			var manager = new LocalCommandManager(
 				dataManager, new FakeLogger(), Config.Create(),
-				new TimeProvider(), storage, syncService);
+				new SystemTimeProvider(), storage, syncService);
 			manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			manager.ExecuteCommand(nameof(TestCommands.AddScore), new TestArgs { Value = 5 });
@@ -107,13 +108,13 @@ namespace BlueCheese.LocalCommands.Tests
 		{
 			public int SyncCallCount { get; private set; }
 
-			public Task<SyncResponse> SyncAsync(SyncRequest request)
+			public Task<SyncResponse> SyncAsync(SyncRequest request, CancellationToken cancellationToken = default)
 			{
 				SyncCallCount++;
 				return Task.FromResult(SyncResponse.Ok());
 			}
 
-			public Task<FetchResponse> FetchAsync() =>
+			public Task<FetchResponse> FetchAsync(CancellationToken cancellationToken = default) =>
 				Task.FromResult(FetchResponse.Ok(new Dictionary<string, string>()));
 		}
 	}
@@ -141,7 +142,7 @@ namespace BlueCheese.LocalCommands.Tests
 			var dataManager1 = new DataManager(new FakeDataStorage(), serializer);
 			var manager1 = new LocalCommandManager(
 				dataManager1, new FakeLogger(), Config.Create(),
-				new TimeProvider(), historyStorage);
+				new SystemTimeProvider(), historyStorage);
 			manager1.RegisterCommands(Assembly.GetExecutingAssembly());
 			manager1.ExecuteCommand(nameof(TestCommands.AddScore), new TestArgs { Value = 10 });
 
@@ -150,7 +151,7 @@ namespace BlueCheese.LocalCommands.Tests
 			var dataManager2 = new DataManager(new FakeDataStorage(), serializer);
 			var manager2 = new LocalCommandManager(
 				dataManager2, new FakeLogger(), Config.Create(),
-				new TimeProvider(), historyStorage);
+				new SystemTimeProvider(), historyStorage);
 			manager2.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			var reloadedCall = manager2.History[0];
@@ -160,6 +161,52 @@ namespace BlueCheese.LocalCommands.Tests
 
 			Assert.AreEqual(10, dataManager2.Get<TestScoreData>().Score,
 				"The replayed command must produce the correct result on a fresh data state.");
+		}
+	}
+
+	// Verifies that when the server reports a desync, the client recovers by re-fetching and
+	// importing the authoritative state, and clears its local history.
+	[TestFixture]
+	public class DesyncRecoveryTests
+	{
+		[Test]
+		public async Task Sync_WhenServerReportsDesync_ReimportsAuthoritativeStateAndClearsHistory()
+		{
+			var serializer = new NewtonsoftJsonSerializer();
+			var storage = new FakeDataStorage();
+			var dataManager = new DataManager(storage, serializer);
+
+			var serverState = new Dictionary<string, string>
+			{
+				[typeof(TestScoreData).FullName] = serializer.Serialize(new TestScoreData { Score = 999 }, typeof(TestScoreData)),
+			};
+
+			var manager = new LocalCommandManager(
+				dataManager, new FakeLogger(), Config.Create(),
+				new SystemTimeProvider(), storage, new DesyncThenFetchSyncService(serverState));
+			manager.RegisterCommands(Assembly.GetExecutingAssembly());
+
+			manager.ExecuteCommand(nameof(TestCommands.AddScore), new TestArgs { Value = 5 });
+			Assert.AreEqual(1, manager.History.Count, "Command should be queued before sync.");
+
+			await manager.Sync();
+
+			Assert.AreEqual(0, manager.History.Count, "Desync recovery must clear the local history.");
+			Assert.AreEqual(999, dataManager.Get<TestScoreData>().Score,
+				"Client must adopt the authoritative server state after a desync.");
+		}
+
+		private class DesyncThenFetchSyncService : ISyncService
+		{
+			private readonly Dictionary<string, string> _serverState;
+
+			public DesyncThenFetchSyncService(Dictionary<string, string> serverState) => _serverState = serverState;
+
+			public Task<SyncResponse> SyncAsync(SyncRequest request, CancellationToken cancellationToken = default) =>
+				Task.FromResult(SyncResponse.Desync("Client state hash mismatch."));
+
+			public Task<FetchResponse> FetchAsync(CancellationToken cancellationToken = default) =>
+				Task.FromResult(FetchResponse.Ok(_serverState));
 		}
 	}
 }

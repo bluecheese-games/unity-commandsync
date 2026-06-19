@@ -9,8 +9,8 @@ namespace BlueCheese.LocalCommands.Core
 	[Serializable]
 	public class SyncRequest
 	{
-		public LocalCommandManager.CommandCall[] Commands { get; set; }
+		public CommandCall[] Commands { get; set; }
 
-		public int ClientStateHash { get; set; }
+		public long ClientStateHash { get; set; }
 	}
 }

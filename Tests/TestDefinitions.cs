@@ -19,28 +19,30 @@ namespace BlueCheese.LocalCommands.Tests
 
 	public struct TestArgs { public int Value; }
 
+	public struct ReadbackData { public int Value; }
+
 	public static class TestCommands
 	{
 		[LocalCommand]
-		public static void AddScore(Context context, TestArgs args)
+		public static void AddScore(CommandContext context, TestArgs args)
 		{
 			context.Data.Update((ref TestScoreData data) => data.Score += args.Value);
 		}
 
 		[LocalCommand("SecretName")]
-		public static void CustomNamedMethod(Context context)
+		public static void CustomNamedMethod(CommandContext context)
 		{
 			context.Data.Update((ref TestScoreData data) => data.Score = 99);
 		}
 
 		[LocalCommand]
-		public static void NoOpCommand(Context context) { }
+		public static void NoOpCommand(CommandContext context) { }
 
 		[LocalCommand]
-		public static void ValueTypeCommand(Context context, ValueTypeArgs args) { }
+		public static void ValueTypeCommand(CommandContext context, ValueTypeArgs args) { }
 
 		[LocalCommand]
-		public static void NestedUpdateCommand(Context context)
+		public static void NestedUpdateCommand(CommandContext context)
 		{
 			context.Data.Update((ref TestScoreData data) =>
 			{
@@ -51,9 +53,24 @@ namespace BlueCheese.LocalCommands.Tests
 		}
 
 		[LocalCommand]
-		public static void ThrowingCommand(Context context)
+		public static void ThrowingCommand(CommandContext context)
 		{
 			throw new Exception("Intentional crash for testing");
+		}
+
+		[LocalCommand]
+		public static void MutateThenFail(CommandContext context)
+		{
+			context.Data.Update((ref TestScoreData data) => data.Score = 50);
+			context.State.Fail("Simulated failure after a data mutation.");
+		}
+
+		[LocalCommand]
+		public static void ReadAfterWrite(CommandContext context)
+		{
+			context.Data.Update((ref TestScoreData data) => data.Score = 5);
+			int readBack = context.Data.Get<TestScoreData>().Score;
+			context.Data.Update((ref ReadbackData data) => data.Value = readBack);
 		}
 	}
 }

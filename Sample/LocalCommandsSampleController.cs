@@ -9,6 +9,7 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
@@ -80,7 +81,7 @@ public class PlayerPrefsDataStorage : IDataStorage
 
 public class DummyCommandSyncService : ISyncService
 {
-	public Task<SyncResponse> SyncAsync(SyncRequest request)
+	public Task<SyncResponse> SyncAsync(SyncRequest request, CancellationToken cancellationToken = default)
 	{
 		Debug.Log($"Syncing {request.Commands.Length} commands to server...");
 		foreach (var cmd in request.Commands)
@@ -92,7 +93,7 @@ public class DummyCommandSyncService : ISyncService
 		return Task.FromResult(SyncResponse.Ok());
 	}
 
-	public Task<FetchResponse> FetchAsync()
+	public Task<FetchResponse> FetchAsync(CancellationToken cancellationToken = default)
 	{
 		// Simulate fetching full state from server (empty in this dummy implementation)
 		return Task.FromResult(FetchResponse.Ok(new()));
@@ -120,11 +121,16 @@ public class LocalCommandsSampleController : MonoBehaviour
 		var serializer = new NewtonsoftJsonSerializer();
 		var dataStorage = new PlayerPrefsDataStorage(serializer, "Sample");
 		var dataManager = new DataManager(dataStorage, serializer);
-		var timeProvider = new TimeProvider();
+		var timeProvider = new SystemTimeProvider();
 		var syncService = new UnityHttpSyncService(_syncEndpoint, serializer);
 		var commandsDataStorage = new PlayerPrefsDataStorage(serializer, "Commands");
 		var config = Config.Create();
-		_localCommandManager = new LocalCommandManager(dataManager, logger, config, timeProvider, commandsDataStorage, syncService);
+		_localCommandManager = new LocalCommandManager(dataManager,
+			logger: logger,
+			config: config,
+			timeProvider: timeProvider,
+			commandsDataStorage: commandsDataStorage,
+			syncService: syncService);
 		_localCommandManager.RegisterCommands(typeof(SampleCommands).Assembly);
 
 		_dataManager = dataManager;
@@ -315,7 +321,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 			_serializer = serializer;
 		}
 
-		public async Task<SyncResponse> SyncAsync(SyncRequest request)
+		public async Task<SyncResponse> SyncAsync(SyncRequest request, CancellationToken cancellationToken = default)
 		{
 			// Serialize the request (Commands + Hash)
 			string jsonPayload = _serializer.Serialize(request);
@@ -333,7 +339,8 @@ public class LocalCommandsSampleController : MonoBehaviour
 			// Asynchronously wait for the web request to complete
 			while (!operation.isDone)
 			{
-				await Task.Delay(10); // Avoids blocking the main Unity thread
+				cancellationToken.ThrowIfCancellationRequested();
+				await Task.Delay(10, cancellationToken); // Avoids blocking the main Unity thread
 			}
 
 			// Network error handling
@@ -359,7 +366,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 			}
 		}
 
-		public async Task<FetchResponse> FetchAsync()
+		public async Task<FetchResponse> FetchAsync(CancellationToken cancellationToken = default)
 		{
 			// Derives the state URL by replacing /sync with /state
 			string stateUrl = _serverUrl.Replace("/sync", "/state");
@@ -369,7 +376,8 @@ public class LocalCommandsSampleController : MonoBehaviour
 
 			while (!operation.isDone)
 			{
-				await Task.Delay(10);
+				cancellationToken.ThrowIfCancellationRequested();
+				await Task.Delay(10, cancellationToken);
 			}
 
 			if (www.result == UnityWebRequest.Result.ConnectionError || www.result == UnityWebRequest.Result.ProtocolError)

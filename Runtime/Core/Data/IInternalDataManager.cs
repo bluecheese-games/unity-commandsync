@@ -10,5 +10,11 @@ namespace BlueCheese.LocalCommands.Core
 	{
 		DataBox<T> GetBox<T>(T defaultValue = default);
 		IDataStorage Storage { get; }
+
+		/// <summary>
+		/// Discards all uncommitted (dirty) changes, restoring the last flushed state.
+		/// Used to roll back the in-memory mutations of a command that failed.
+		/// </summary>
+		void RevertChanges();
 	}
 }

@@ -33,6 +33,19 @@ namespace BlueCheese.LocalCommands.Tests
 		}
 
 		[Test]
+		public void Init_WithKnownSeed_ProducesPinnedSequence()
+		{
+			// Regression guard: locks the SplitMix64 output so the sequence stays stable across
+			// versions and runtimes. If this value ever changes, client/server replay would desync.
+			var rng = new RandomGenerator();
+			rng.Init(12345);
+
+			int roll = rng.Next(1, 100000);
+
+			Assert.AreEqual(51953, roll, "The deterministic PRNG must produce the pinned value for seed 12345.");
+		}
+
+		[Test]
 		public void Init_WithDifferentSeeds_ProducesDifferentSequences()
 		{
 			var rng1 = new RandomGenerator();

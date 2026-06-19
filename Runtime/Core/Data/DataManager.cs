@@ -45,6 +45,12 @@ namespace BlueCheese.LocalCommands.Core
 
 		public T Get<T>(T defaultValue = default)
 		{
+			// Return the in-flight cached value so reads observe writes made earlier in the same command.
+			if (_cache.TryGetValue(typeof(T), out var cached) && cached is DataBox<T> box)
+			{
+				return box.Value;
+			}
+
 			if (_storage.TryLoad(typeof(T).FullName, out T storedValue))
 			{
 				return storedValue;
@@ -72,22 +78,40 @@ namespace BlueCheese.LocalCommands.Core
 			}
 		}
 
-		public int GetStateHash(IEnumerable<Type> keysToHash = null)
+		public void RevertChanges()
+		{
+			// Drop every dirty box so the next access reloads the last committed value from storage.
+			var dirtyTypes = new List<Type>();
+			foreach (var kvp in _cache)
+			{
+				if (kvp.Value is IDataBox box && box.IsDirty)
+				{
+					dirtyTypes.Add(kvp.Key);
+				}
+			}
+
+			foreach (var type in dirtyTypes)
+			{
+				_cache.Remove(type);
+			}
+		}
+
+		public long GetStateHash(IEnumerable<Type> keysToHash = null)
 		{
 			// Sort by FullName so the hash is deterministic regardless of Dictionary or caller order.
 			var keys = (keysToHash ?? _cache.Keys).OrderBy(t => t.FullName);
 
-			int hash = 17;
+			long hash = 17;
 			foreach (var type in keys)
 			{
 				if (_storage.TryLoad(type.FullName, type, out object value))
 				{
 					var serialized = _serializer.Serialize(value);
-					hash = hash * 31 + HashUtility.GetDeterministicHashCode(serialized);
+					hash = hash * 31 + HashUtility.GetDeterministicHashCode64(serialized);
 				}
 				else
 				{
-					hash = hash * 31;
+					hash *= 31;
 				}
 			}
 			return hash;
@@ -116,12 +140,7 @@ namespace BlueCheese.LocalCommands.Core
 		{
 			foreach (var kvp in serializedState)
 			{
-				Type type = null;
-				foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-				{
-					type = assembly.GetType(kvp.Key);
-					if (type != null) break;
-				}
+				Type type = TypeResolver.Resolve(kvp.Key);
 
 				if (type == null)
 				{

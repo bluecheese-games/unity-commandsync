@@ -3,6 +3,7 @@
 //
 
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Serialization;
 using System;
 
@@ -36,6 +37,20 @@ namespace BlueCheese.LocalCommands.Core
 
 		public object Deserialize(string serializedData, Type type) => JsonConvert.DeserializeObject(serializedData, type, _settings);
 
+		public bool TryConvert(object value, Type targetType, out object result)
+		{
+			// Only JToken instances are serialization intermediates we can safely reinterpret.
+			// Any other type is left to the caller's validation (e.g. a wrong-typed argument).
+			if (value is JToken token)
+			{
+				result = token.ToObject(targetType);
+				return true;
+			}
+
+			result = value;
+			return false;
+		}
+
 		public class SimpleNameBinder : ISerializationBinder
 		{
 			public void BindToName(Type serializedType, out string assemblyName, out string typeName)
@@ -46,12 +61,7 @@ namespace BlueCheese.LocalCommands.Core
 
 			public Type BindToType(string assemblyName, string typeName)
 			{
-				foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-				{
-					var type = assembly.GetType(typeName);
-					if (type != null) return type;
-				}
-				return null;
+				return TypeResolver.Resolve(typeName);
 			}
 		}
 	}

@@ -6,7 +6,7 @@ using System;
 
 namespace BlueCheese.LocalCommands.Core
 {
-	public class TimeProvider : ITimeProvider
+	public class SystemTimeProvider : ITimeProvider
 	{
 		public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
 	}

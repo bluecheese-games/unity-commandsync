@@ -12,7 +12,7 @@ namespace BlueCheese.LocalCommands.Core
 	/// in the middle of the sending command's execution.
 	/// Rules:
 	/// - Static method
-	/// - First parameter: Context
+	/// - First parameter: CommandContext
 	/// - Second parameter: the signal payload struct
 	/// Signal handlers are not stored in the command history — they are re-executed
 	/// implicitly when the triggering command is replayed.

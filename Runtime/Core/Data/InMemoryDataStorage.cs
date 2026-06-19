@@ -42,10 +42,5 @@ namespace BlueCheese.LocalCommands.Core
 			data = null;
 			return false;
 		}
-
-		public void Flush()
-		{
-			// In-memory storage doesn't need to flush, but the method is required by the interface.
-		}
 	}
 }

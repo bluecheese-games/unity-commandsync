@@ -22,7 +22,7 @@ namespace BlueCheese.LocalCommands.Tests
 			_dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
 			_manager = new LocalCommandManager(
 				_dataManager, new FakeLogger(), Config.Create(),
-				new TimeProvider(), storage);
+				new SystemTimeProvider(), storage);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 		}
 
@@ -90,7 +90,7 @@ namespace BlueCheese.LocalCommands.Tests
 			var storage = new FakeDataStorage();
 			var dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
 			var logger = new FakeLogger();
-			var manager = new LocalCommandManager(dataManager, logger, Config.Create(), new TimeProvider(), storage);
+			var manager = new LocalCommandManager(dataManager, logger, Config.Create(), new SystemTimeProvider(), storage);
 			manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			Assert.DoesNotThrow(() => manager.ExecuteCommand(nameof(SignalTestCommands.TriggerInfiniteSignalLoop)),
@@ -103,26 +103,17 @@ namespace BlueCheese.LocalCommands.Tests
 		[Test]
 		public void RegisterCommands_InvalidSignalHandlerSignature_Throws()
 		{
-			// A method without the required signal payload parameter should fail at registration.
-			// RegisterSignalHandler is private, so we invoke it via reflection — which wraps the
-			// exception in a TargetInvocationException. We unwrap it to verify the root cause.
-			var manager = new LocalCommandManager(
-				_dataManager, new FakeLogger(), Config.Create(),
-				new TimeProvider(), new FakeDataStorage());
+			// A method without the required signal payload parameter must be rejected at registration.
+			// CommandRegistry is internal but visible to tests, so we register the bad handler directly.
+			var registry = new CommandRegistry();
 
 			var method = typeof(InvalidSignalHandlers).GetMethod(
 				nameof(InvalidSignalHandlers.BadHandler),
 				BindingFlags.Public | BindingFlags.Static);
 
-			var registerMethod = typeof(LocalCommandManager).GetMethod(
-				"RegisterSignalHandler",
-				BindingFlags.NonPublic | BindingFlags.Instance);
-
-			var ex = Assert.Throws<TargetInvocationException>(
-				() => registerMethod.Invoke(manager, new object[] { method }));
-
-			Assert.IsInstanceOf<CommandRegistrationException>(ex.InnerException,
-				"The root cause must be a CommandRegistrationException for an invalid handler signature.");
+			Assert.Throws<CommandRegistrationException>(
+				() => registry.RegisterSignalHandler(method),
+				"An invalid signal handler signature must be rejected at registration.");
 		}
 	}
 
@@ -139,7 +130,7 @@ namespace BlueCheese.LocalCommands.Tests
 			_dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
 			_manager = new LocalCommandManager(
 				_dataManager, new FakeLogger(), Config.Create(),
-				new TimeProvider(), storage);
+				new SystemTimeProvider(), storage);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 		}
 
@@ -177,6 +168,18 @@ namespace BlueCheese.LocalCommands.Tests
 			_manager.ExecuteCommand(nameof(ExternalEventTestCommands.AddItem));
 
 			Assert.AreEqual(0, callCount, "Unsubscribed handler must not be called.");
+		}
+
+		[Test]
+		public void ExternalEvent_DisposingSubscriptionHandle_StopsDelivery()
+		{
+			int callCount = 0;
+			var subscription = _manager.On<ItemAddedEvent>(_ => callCount++);
+
+			subscription.Dispose();
+			_manager.ExecuteCommand(nameof(ExternalEventTestCommands.AddItem));
+
+			Assert.AreEqual(0, callCount, "Disposing the subscription handle must unsubscribe the handler.");
 		}
 
 		[Test]
@@ -237,25 +240,25 @@ namespace BlueCheese.LocalCommands.Tests
 	public static class SignalTestCommands
 	{
 		[LocalCommand]
-		public static void GainXp(Context ctx, SignalXpArgs args)
+		public static void GainXp(CommandContext ctx, SignalXpArgs args)
 		{
 			ctx.Signals.Send(new XpGainedSignal { Amount = args.Amount });
 		}
 
 		[LocalCommand]
-		public static void RollOnSignal(Context ctx)
+		public static void RollOnSignal(CommandContext ctx)
 		{
 			ctx.Signals.Send(new RollSignal());
 		}
 
 		[LocalCommand]
-		public static void TriggerInfiniteSignalLoop(Context ctx)
+		public static void TriggerInfiniteSignalLoop(CommandContext ctx)
 		{
 			ctx.Signals.Send(new InfiniteLoopSignal());
 		}
 
 		[LocalCommand]
-		public static void SendPrioritySignal(Context ctx)
+		public static void SendPrioritySignal(CommandContext ctx)
 		{
 			ctx.Signals.Send(new PrioritySignal());
 		}
@@ -264,7 +267,7 @@ namespace BlueCheese.LocalCommands.Tests
 	public static class ExternalEventTestCommands
 	{
 		[LocalCommand]
-		public static void AddItem(Context ctx)
+		public static void AddItem(CommandContext ctx)
 		{
 			ctx.Data.Update((ref ItemInventoryData d) => d.Count++);
 			ctx.Events.Raise(new ItemAddedEvent { ItemId = 42 });
@@ -278,7 +281,7 @@ namespace BlueCheese.LocalCommands.Tests
 	public static class SignalTestHandlers
 	{
 		[LocalSignalHandler]
-		public static void OnXpGained(Context ctx, XpGainedSignal signal)
+		public static void OnXpGained(CommandContext ctx, XpGainedSignal signal)
 		{
 			ctx.Data.Update((ref SignalCounterData d) =>
 			{
@@ -293,20 +296,20 @@ namespace BlueCheese.LocalCommands.Tests
 		}
 
 		[LocalSignalHandler]
-		public static void OnLevelUp(Context ctx, LevelUpSignal signal)
+		public static void OnLevelUp(CommandContext ctx, LevelUpSignal signal)
 		{
 			ctx.Data.Update((ref SignalLevelData d) => d.Level = signal.NewLevel);
 		}
 
 		[LocalSignalHandler]
-		public static void OnRollSignal(Context ctx, RollSignal signal)
+		public static void OnRollSignal(CommandContext ctx, RollSignal signal)
 		{
 			int roll = ctx.RNG.Next(1, 100);
 			ctx.Data.Update((ref SignalRollData d) => d.LastRoll = roll);
 		}
 
 		[LocalSignalHandler]
-		public static void OnInfiniteLoopSignal(Context ctx, InfiniteLoopSignal signal)
+		public static void OnInfiniteLoopSignal(CommandContext ctx, InfiniteLoopSignal signal)
 		{
 			// Intentionally sends the same signal to trigger the depth protection
 			ctx.Signals.Send(new InfiniteLoopSignal());
@@ -318,7 +321,7 @@ namespace BlueCheese.LocalCommands.Tests
 	// so it doesn't pollute the assembly-wide scan in Setup().
 	public static class InvalidSignalHandlers
 	{
-		public static void BadHandler(Context ctx) { } // missing signal payload parameter
+		public static void BadHandler(CommandContext ctx) { } // missing signal payload parameter
 	}
 
 	// ---------------------------------------------------------------------------
@@ -330,19 +333,19 @@ namespace BlueCheese.LocalCommands.Tests
 	public static class PrioritySignalHandlers
 	{
 		[LocalSignalHandler(10)]
-		public static void HandlerPrio10(Context ctx, PrioritySignal signal)
+		public static void HandlerPrio10(CommandContext ctx, PrioritySignal signal)
 		{
 			ctx.Data.Update((ref PriorityOrderData d) => d.Value = d.Value * 10 + 1);
 		}
 
 		[LocalSignalHandler(5)]
-		public static void HandlerPrio5(Context ctx, PrioritySignal signal)
+		public static void HandlerPrio5(CommandContext ctx, PrioritySignal signal)
 		{
 			ctx.Data.Update((ref PriorityOrderData d) => d.Value = d.Value * 10 + 2);
 		}
 
 		[LocalSignalHandler(1)]
-		public static void HandlerPrio1(Context ctx, PrioritySignal signal)
+		public static void HandlerPrio1(CommandContext ctx, PrioritySignal signal)
 		{
 			ctx.Data.Update((ref PriorityOrderData d) => d.Value = d.Value * 10 + 3);
 		}
@@ -365,7 +368,7 @@ namespace BlueCheese.LocalCommands.Tests
 			_dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
 			_manager = new LocalCommandManager(
 				_dataManager, new FakeLogger(), Config.Create(),
-				new TimeProvider(), storage);
+				new SystemTimeProvider(), storage);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 		}
 

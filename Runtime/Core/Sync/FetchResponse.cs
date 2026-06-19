@@ -18,7 +18,7 @@ namespace BlueCheese.LocalCommands.Core
 			Data = data,
 		};
 
-		static public new FetchResponse Fail(string errorMessage) => new()
+		static public FetchResponse Fail(string errorMessage) => new()
 		{
 			Success = false,
 			Message = errorMessage,

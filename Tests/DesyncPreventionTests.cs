@@ -30,8 +30,8 @@ namespace BlueCheese.LocalCommands.Tests
 			_dataManager.Set(new ValueTypeArgs { Id = 7 });
 			_dataManager.Flush();
 
-			int hash1 = _dataManager.GetStateHash(null);
-			int hash2 = _dataManager.GetStateHash(null);
+			long hash1 = _dataManager.GetStateHash(null);
+			long hash2 = _dataManager.GetStateHash(null);
 
 			Assert.AreEqual(hash1, hash2,
 				"GetStateHash(null) must return the same value on consecutive calls for the same state.");
@@ -82,7 +82,7 @@ namespace BlueCheese.LocalCommands.Tests
 				_dataManager,
 				new FakeLogger(),
 				config,
-				new TimeProvider(),
+				new SystemTimeProvider(),
 				storage,
 				new FakeCommandSyncService()
 			);
@@ -116,10 +116,10 @@ namespace BlueCheese.LocalCommands.Tests
 			_dataManager.Flush();
 
 			// Act: Hash using an explicitly empty list (simulating a sync request where no data changed)
-			int hashEmpty = _dataManager.GetStateHash(new List<Type>());
+			long hashEmpty = _dataManager.GetStateHash(new List<Type>());
 
 			// Act: Hash using null (simulating a full state hash fallback)
-			int hashNull = _dataManager.GetStateHash(null);
+			long hashNull = _dataManager.GetStateHash(null);
 
 			// Assert
 			Assert.AreEqual(17, hashEmpty, "An empty list should result in the default hash seed (17), not fallback to the entire cache.");
@@ -138,8 +138,8 @@ namespace BlueCheese.LocalCommands.Tests
 			var order1 = new List<Type> { typeof(TestScoreData), typeof(ValueTypeArgs) };
 			var order2 = new List<Type> { typeof(ValueTypeArgs), typeof(TestScoreData) };
 
-			int hash1 = _dataManager.GetStateHash(order1);
-			int hash2 = _dataManager.GetStateHash(order2);
+			long hash1 = _dataManager.GetStateHash(order1);
+			long hash2 = _dataManager.GetStateHash(order2);
 
 			// Assert
 			Assert.AreEqual(hash1, hash2, "The generated hash must be identical regardless of the input IEnumerable order, thanks to internal sorting.");
@@ -161,7 +161,7 @@ namespace BlueCheese.LocalCommands.Tests
 			_manager.ExecuteCommand(nameof(TestCommands.NoOpCommand));
 
 			// 4. Server computes the state hash for Request B's delta
-			int hash = _dataManager.GetStateHash(_manager.UpdatedDataTypes);
+			long hash = _dataManager.GetStateHash(_manager.UpdatedDataTypes);
 
 			// Assert
 			Assert.AreEqual(17, hash, "Hash should be the default seed (17) because NoOpCommand changed nothing, and the history was properly cleared from Request A's modifications.");

@@ -4,10 +4,10 @@
 
 namespace BlueCheese.LocalCommands.Core
 {
-	public struct Context
+	public struct CommandContext
 	{
 		public IConfig Config { get; private set; }
-		public Data Data { get; private set; }
+		public DataAccessor Data { get; private set; }
 		public ILogger Logger { get; private set; }
 		public ITimeProvider Time { get; private set; }
 		public IRandomGenerator RNG { get; private set; }
@@ -25,7 +25,7 @@ namespace BlueCheese.LocalCommands.Core
 		/// </summary>
 		public IEventContext Events { get; private set; }
 
-		internal Context(IConfig config, Data data, ILogger logger, ExecutionState state, ITimeProvider timeProvider, IRandomGenerator rng, ISignalContext signals, IEventContext events)
+		internal CommandContext(IConfig config, DataAccessor data, ILogger logger, ExecutionState state, ITimeProvider timeProvider, IRandomGenerator rng, ISignalContext signals, IEventContext events)
 		{
 			Config = config;
 			Data = data;
