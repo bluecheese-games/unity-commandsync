@@ -4,25 +4,25 @@
 
 using System;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
-	public class LocalCommandException : Exception
+	public class CommandException : Exception
 	{
-		public LocalCommandException(string message) : base(message) { }
+		public CommandException(string message) : base(message) { }
 	}
 
-	public class CommandNotFoundException : LocalCommandException
+	public class CommandNotFoundException : CommandException
 	{
 		public CommandNotFoundException(string commandName)
 			: base($"No command registered with the name '{commandName}'.") { }
 	}
 
-	public class CommandRegistrationException : LocalCommandException
+	public class CommandRegistrationException : CommandException
 	{
 		public CommandRegistrationException(string message) : base(message) { }
 	}
 
-	public class CommandArgumentException : LocalCommandException
+	public class CommandArgumentException : CommandException
 	{
 		public CommandArgumentException(string message) : base(message) { }
 	}

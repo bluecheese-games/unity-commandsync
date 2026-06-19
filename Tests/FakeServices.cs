@@ -6,9 +6,9 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using BlueCheese.LocalCommands.Core;
+using BlueCheese.CommandSync.Core;
 
-namespace BlueCheese.LocalCommands.Tests
+namespace BlueCheese.CommandSync.Tests
 {
 	public class FakeDataStorage : IDataStorage
 	{

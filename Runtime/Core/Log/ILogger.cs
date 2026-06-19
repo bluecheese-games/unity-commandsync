@@ -4,7 +4,7 @@
 
 using System;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	public interface ILogger
 	{

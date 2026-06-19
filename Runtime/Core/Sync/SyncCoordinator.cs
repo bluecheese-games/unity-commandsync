@@ -5,7 +5,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	// Owns the online/offline mode and the synchronization lifecycle: initial load, batch sync,
 	// desync recovery and history clearing.

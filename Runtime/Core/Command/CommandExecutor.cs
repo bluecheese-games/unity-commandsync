@@ -5,7 +5,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	// Orchestrates a single command execution: argument conversion, context creation, signal dispatch,
 	// failure rollback, external event dispatch, data flush and history enqueuing.

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 BlueCheese Games All rights reserved
 //
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	public struct CommandContext
 	{
@@ -14,7 +14,7 @@ namespace BlueCheese.LocalCommands.Core
 		public ExecutionState State { get; private set; }
 
 		/// <summary>
-		/// Sends a signal synchronously to other commands within the LocalCommands module.
+		/// Sends a signal synchronously to other commands within the CommandSync module.
 		/// The signal handler executes immediately before this call returns.
 		/// </summary>
 		public ISignalContext Signals { get; private set; }

@@ -5,7 +5,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	// Routes signals synchronously to their registered handlers, sharing the triggering command's
 	// data and state, with deterministic per-handler RNG seeds and cascade-depth protection.

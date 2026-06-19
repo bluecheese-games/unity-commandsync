@@ -5,14 +5,14 @@
 using NUnit.Framework;
 using System.Reflection;
 using System.Collections.Generic;
-using BlueCheese.LocalCommands.Core;
+using BlueCheese.CommandSync.Core;
 
-namespace BlueCheese.LocalCommands.Tests
+namespace BlueCheese.CommandSync.Tests
 {
 	[TestFixture]
-	public class LocalCommandManagerTests
+	public class CommandManagerTests
 	{
-		private LocalCommandManager _manager;
+		private CommandManager _manager;
 		private ISerializer _serializer;
 		private DataManager _dataManager;
 		private FakeDataStorage _storage;
@@ -29,7 +29,7 @@ namespace BlueCheese.LocalCommands.Tests
 			_syncService = new FakeCommandSyncService();
 
 			var config = Config.Create(new Dictionary<string, object> { { "multiplier", 2 } });
-			_manager = new LocalCommandManager(_dataManager, _logger, config, new SystemTimeProvider(), _storage, _syncService);
+			_manager = new CommandManager(_dataManager, _logger, config, new SystemTimeProvider(), _storage, _syncService);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 		}
 
@@ -43,7 +43,7 @@ namespace BlueCheese.LocalCommands.Tests
 		[Test]
 		public void Execute_ByCustomAttributeName_Success()
 		{
-			// Verifies [LocalCommand("SecretName")] correctly resolves 
+			// Verifies [Command("SecretName")] correctly resolves
 			_manager.ExecuteCommand("SecretName");
 			Assert.AreEqual(99, _dataManager.Get<TestScoreData>().Score);
 		}
@@ -73,7 +73,7 @@ namespace BlueCheese.LocalCommands.Tests
 			_ = _manager.Sync();
 
 			Assert.AreEqual(0, _manager.History.Count);
-			bool loaded = _storage.TryLoad("LocalCommand_History", typeof(CommandHistory), out var historyObj);
+			bool loaded = _storage.TryLoad("CommandSync_History", typeof(CommandHistory), out var historyObj);
 			Assert.IsTrue(loaded);
 			Assert.AreEqual(0, ((CommandHistory)historyObj).ToArray().Length);
 		}

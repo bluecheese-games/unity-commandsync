@@ -4,11 +4,11 @@
 
 using System.Collections.Generic;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	/// <summary>
 	/// Collects external events raised during a command execution.
-	/// The LocalCommandManager drains this queue after the command and all its
+	/// The CommandManager drains this queue after the command and all its
 	/// signal handlers have completed, dispatching each event to registered subscribers.
 	/// </summary>
 	internal class EventContext : IEventContext

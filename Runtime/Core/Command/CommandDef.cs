@@ -6,7 +6,7 @@ using System;
 using System.Linq.Expressions;
 using System.Reflection;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	// Compiled, cached descriptor of a registered command method.
 	internal struct CommandDef

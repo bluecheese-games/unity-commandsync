@@ -6,7 +6,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	[Serializable]
 	public class CommandHistory

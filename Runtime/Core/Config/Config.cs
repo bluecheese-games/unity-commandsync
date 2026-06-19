@@ -4,7 +4,7 @@
 
 using System.Collections.Generic;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	public class Config : IConfig
 	{

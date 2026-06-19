@@ -5,12 +5,12 @@
 using System;
 using System.Collections.Generic;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	// Owns the persisted command history (queue of calls + set of updated data types) and its storage I/O.
 	internal sealed class CommandHistoryStore
 	{
-		private const string CommandHistoryPrefKey = "LocalCommand_History";
+		private const string CommandHistoryPrefKey = "CommandSync_History";
 
 		private readonly IDataStorage _storage;
 		private readonly CommandHistory _history;

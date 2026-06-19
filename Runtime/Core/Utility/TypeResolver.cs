@@ -5,7 +5,7 @@
 using System;
 using System.Collections.Concurrent;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	/// <summary>
 	/// Resolves a <see cref="Type"/> from its full name by scanning loaded assemblies, with caching.

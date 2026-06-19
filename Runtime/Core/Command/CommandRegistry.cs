@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	// Discovers and stores command and signal handler definitions, and provides lookup for the executor.
 	internal sealed class CommandRegistry
@@ -16,16 +16,16 @@ namespace BlueCheese.LocalCommands.Core
 
 		public void RegisterFromAssembly(Assembly assembly)
 		{
-			// Find all static methods that have the LocalCommandAttribute or the LocalSignalHandlerAttribute
+			// Find all static methods that have the CommandAttribute or the SignalHandlerAttribute
 			foreach (var type in assembly.GetTypes())
 			{
 				foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
 				{
-					if (method.GetCustomAttribute<LocalCommandAttribute>() != null)
+					if (method.GetCustomAttribute<CommandAttribute>() != null)
 					{
 						RegisterCommand(method);
 					}
-					else if (method.GetCustomAttribute<LocalSignalHandlerAttribute>() != null)
+					else if (method.GetCustomAttribute<SignalHandlerAttribute>() != null)
 					{
 						RegisterSignalHandler(method);
 					}
@@ -35,7 +35,7 @@ namespace BlueCheese.LocalCommands.Core
 
 		public void RegisterCommand(MethodInfo method)
 		{
-			var attr = method.GetCustomAttribute<LocalCommandAttribute>();
+			var attr = method.GetCustomAttribute<CommandAttribute>();
 			var commandName = attr.Name ?? method.Name;
 			if (_definitions.ContainsKey(commandName))
 			{
@@ -72,7 +72,7 @@ namespace BlueCheese.LocalCommands.Core
 					$"Signal handler '{method.Name}': signal payload type '{signalType.Name}' must be a struct.");
 			}
 
-			var attr = method.GetCustomAttribute<LocalSignalHandlerAttribute>();
+			var attr = method.GetCustomAttribute<SignalHandlerAttribute>();
 			var handlerDef = new SignalHandlerDef(method.Name, signalType, attr.Priority, method);
 
 			if (!_signalHandlers.TryGetValue(signalType, out var handlers))

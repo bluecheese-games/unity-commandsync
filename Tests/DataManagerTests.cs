@@ -2,13 +2,13 @@
 // Copyright (c) 2026 BlueCheese Games All rights reserved
 //
 
-using BlueCheese.LocalCommands.Core;
+using BlueCheese.CommandSync.Core;
 using NUnit.Framework;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
 
-namespace BlueCheese.LocalCommands.Tests
+namespace BlueCheese.CommandSync.Tests
 {
 	// Verifies that ImportState rejects unknown type names instead of silently discarding data.
 	[TestFixture]
@@ -28,7 +28,7 @@ namespace BlueCheese.LocalCommands.Tests
 			var stateWithUnknownType = new Dictionary<string, string>
 			{
 				[typeof(TestScoreData).FullName] = "{\"Score\":42}",
-				["BlueCheese.LocalCommands.Tests.ObsoletePlayerData"] = "{\"Level\":5}",
+				["BlueCheese.CommandSync.Tests.ObsoletePlayerData"] = "{\"Level\":5}",
 			};
 
 			Assert.Throws<InvalidOperationException>(() => _dataManager.ImportState(stateWithUnknownType),
@@ -84,7 +84,7 @@ namespace BlueCheese.LocalCommands.Tests
 		{
 			var sharedStorage = new FakeDataStorage();
 			var dataManager = new DataManager(sharedStorage, new NewtonsoftJsonSerializer());
-			var manager = new LocalCommandManager(
+			var manager = new CommandManager(
 				dataManager, new FakeLogger(), Config.Create(),
 				new SystemTimeProvider(), sharedStorage);
 			manager.RegisterCommands(Assembly.GetExecutingAssembly());
@@ -92,7 +92,7 @@ namespace BlueCheese.LocalCommands.Tests
 			manager.ExecuteCommand(nameof(TestCommands.AddScore), new TestArgs { Value = 7 });
 
 			bool historyPresent = sharedStorage.TryLoad(
-				"LocalCommand_History", typeof(CommandHistory), out var historyObj);
+				"CommandSync_History", typeof(CommandHistory), out var historyObj);
 			bool dataPresent = sharedStorage.TryLoad<TestScoreData>(
 				typeof(TestScoreData).FullName, out var scoreData);
 

@@ -1,10 +1,7 @@
 {
-    "name": "BlueCheese.LocalCommands.Sample.Funcs",
-    "rootNamespace": "BlueCheese.LocalCommands.Sample.Funcs",
-    "references": [
-        "GUID:76866d4198574954187f870f1b90a1f1",
-        "GUID:0efe1ab5ea0ac234199d59e25eaf5f0f"
-    ],
+    "name": "BlueCheese.CommandSync.Core",
+    "rootNamespace": "BlueCheese.CommandSync.Core",
+    "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,

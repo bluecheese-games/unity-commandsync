@@ -3,10 +3,10 @@
 //
 
 using NUnit.Framework;
-using BlueCheese.LocalCommands.Core;
+using BlueCheese.CommandSync.Core;
 using System;
 
-namespace BlueCheese.LocalCommands.Tests
+namespace BlueCheese.CommandSync.Tests
 {
 	[TestFixture]
 	public class RandomGeneratorTests

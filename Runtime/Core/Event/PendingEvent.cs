@@ -4,7 +4,7 @@
 
 using System;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	/// <summary>
 	/// Represents an external event queued during command execution, waiting to be

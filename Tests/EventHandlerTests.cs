@@ -4,15 +4,15 @@
 
 using System;
 using System.Reflection;
-using BlueCheese.LocalCommands.Core;
+using BlueCheese.CommandSync.Core;
 using NUnit.Framework;
 
-namespace BlueCheese.LocalCommands.Tests
+namespace BlueCheese.CommandSync.Tests
 {
 	[TestFixture]
-	public class LocalSignalHandlerTests
+	public class SignalHandlerTests
 	{
-		private LocalCommandManager _manager;
+		private CommandManager _manager;
 		private DataManager _dataManager;
 
 		[SetUp]
@@ -20,7 +20,7 @@ namespace BlueCheese.LocalCommands.Tests
 		{
 			var storage = new FakeDataStorage();
 			_dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
-			_manager = new LocalCommandManager(
+			_manager = new CommandManager(
 				_dataManager, new FakeLogger(), Config.Create(),
 				new SystemTimeProvider(), storage);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
@@ -90,7 +90,7 @@ namespace BlueCheese.LocalCommands.Tests
 			var storage = new FakeDataStorage();
 			var dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
 			var logger = new FakeLogger();
-			var manager = new LocalCommandManager(dataManager, logger, Config.Create(), new SystemTimeProvider(), storage);
+			var manager = new CommandManager(dataManager, logger, Config.Create(), new SystemTimeProvider(), storage);
 			manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			Assert.DoesNotThrow(() => manager.ExecuteCommand(nameof(SignalTestCommands.TriggerInfiniteSignalLoop)),
@@ -120,7 +120,7 @@ namespace BlueCheese.LocalCommands.Tests
 	[TestFixture]
 	public class ExternalEventTests
 	{
-		private LocalCommandManager _manager;
+		private CommandManager _manager;
 		private DataManager _dataManager;
 
 		[SetUp]
@@ -128,7 +128,7 @@ namespace BlueCheese.LocalCommands.Tests
 		{
 			var storage = new FakeDataStorage();
 			_dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
-			_manager = new LocalCommandManager(
+			_manager = new CommandManager(
 				_dataManager, new FakeLogger(), Config.Create(),
 				new SystemTimeProvider(), storage);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
@@ -239,25 +239,25 @@ namespace BlueCheese.LocalCommands.Tests
 
 	public static class SignalTestCommands
 	{
-		[LocalCommand]
+		[Command]
 		public static void GainXp(CommandContext ctx, SignalXpArgs args)
 		{
 			ctx.Signals.Send(new XpGainedSignal { Amount = args.Amount });
 		}
 
-		[LocalCommand]
+		[Command]
 		public static void RollOnSignal(CommandContext ctx)
 		{
 			ctx.Signals.Send(new RollSignal());
 		}
 
-		[LocalCommand]
+		[Command]
 		public static void TriggerInfiniteSignalLoop(CommandContext ctx)
 		{
 			ctx.Signals.Send(new InfiniteLoopSignal());
 		}
 
-		[LocalCommand]
+		[Command]
 		public static void SendPrioritySignal(CommandContext ctx)
 		{
 			ctx.Signals.Send(new PrioritySignal());
@@ -266,7 +266,7 @@ namespace BlueCheese.LocalCommands.Tests
 
 	public static class ExternalEventTestCommands
 	{
-		[LocalCommand]
+		[Command]
 		public static void AddItem(CommandContext ctx)
 		{
 			ctx.Data.Update((ref ItemInventoryData d) => d.Count++);
@@ -280,7 +280,7 @@ namespace BlueCheese.LocalCommands.Tests
 
 	public static class SignalTestHandlers
 	{
-		[LocalSignalHandler]
+		[SignalHandler]
 		public static void OnXpGained(CommandContext ctx, XpGainedSignal signal)
 		{
 			ctx.Data.Update((ref SignalCounterData d) =>
@@ -295,20 +295,20 @@ namespace BlueCheese.LocalCommands.Tests
 			}
 		}
 
-		[LocalSignalHandler]
+		[SignalHandler]
 		public static void OnLevelUp(CommandContext ctx, LevelUpSignal signal)
 		{
 			ctx.Data.Update((ref SignalLevelData d) => d.Level = signal.NewLevel);
 		}
 
-		[LocalSignalHandler]
+		[SignalHandler]
 		public static void OnRollSignal(CommandContext ctx, RollSignal signal)
 		{
 			int roll = ctx.RNG.Next(1, 100);
 			ctx.Data.Update((ref SignalRollData d) => d.LastRoll = roll);
 		}
 
-		[LocalSignalHandler]
+		[SignalHandler]
 		public static void OnInfiniteLoopSignal(CommandContext ctx, InfiniteLoopSignal signal)
 		{
 			// Intentionally sends the same signal to trigger the depth protection
@@ -317,7 +317,7 @@ namespace BlueCheese.LocalCommands.Tests
 	}
 
 	// Used to test invalid handler registration.
-	// No [LocalSignalHandler] attribute here — the test registers it manually via reflection
+	// No [SignalHandler] attribute here — the test registers it manually via reflection
 	// so it doesn't pollute the assembly-wide scan in Setup().
 	public static class InvalidSignalHandlers
 	{
@@ -332,19 +332,19 @@ namespace BlueCheese.LocalCommands.Tests
 
 	public static class PrioritySignalHandlers
 	{
-		[LocalSignalHandler(10)]
+		[SignalHandler(10)]
 		public static void HandlerPrio10(CommandContext ctx, PrioritySignal signal)
 		{
 			ctx.Data.Update((ref PriorityOrderData d) => d.Value = d.Value * 10 + 1);
 		}
 
-		[LocalSignalHandler(5)]
+		[SignalHandler(5)]
 		public static void HandlerPrio5(CommandContext ctx, PrioritySignal signal)
 		{
 			ctx.Data.Update((ref PriorityOrderData d) => d.Value = d.Value * 10 + 2);
 		}
 
-		[LocalSignalHandler(1)]
+		[SignalHandler(1)]
 		public static void HandlerPrio1(CommandContext ctx, PrioritySignal signal)
 		{
 			ctx.Data.Update((ref PriorityOrderData d) => d.Value = d.Value * 10 + 3);
@@ -358,7 +358,7 @@ namespace BlueCheese.LocalCommands.Tests
 	[TestFixture]
 	public class SignalPriorityTests
 	{
-		private LocalCommandManager _manager;
+		private CommandManager _manager;
 		private DataManager _dataManager;
 
 		[SetUp]
@@ -366,7 +366,7 @@ namespace BlueCheese.LocalCommands.Tests
 		{
 			var storage = new FakeDataStorage();
 			_dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
-			_manager = new LocalCommandManager(
+			_manager = new CommandManager(
 				_dataManager, new FakeLogger(), Config.Create(),
 				new SystemTimeProvider(), storage);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
@@ -385,28 +385,28 @@ namespace BlueCheese.LocalCommands.Tests
 		}
 
 		[Test]
-		public void LocalSignalHandlerAttribute_DefaultPriority_IsZero()
+		public void SignalHandlerAttribute_DefaultPriority_IsZero()
 		{
 			// Verify that the attribute's default priority value is 0 when not specified.
 			var method = typeof(SignalTestHandlers).GetMethod(
 				nameof(SignalTestHandlers.OnXpGained),
 				BindingFlags.Public | BindingFlags.Static);
 
-			var attr = method.GetCustomAttribute<LocalSignalHandlerAttribute>();
+			var attr = method.GetCustomAttribute<SignalHandlerAttribute>();
 
 			Assert.AreEqual(0, attr.Priority,
-				"A handler declared with [LocalSignalHandler] and no argument must have priority 0.");
+				"A handler declared with [SignalHandler] and no argument must have priority 0.");
 		}
 
 		[Test]
-		public void LocalSignalHandlerAttribute_ExplicitPriority_IsCorrectlyStored()
+		public void SignalHandlerAttribute_ExplicitPriority_IsCorrectlyStored()
 		{
-			// Verify that the integer passed to [LocalSignalHandler(N)] is faithfully stored
+			// Verify that the integer passed to [SignalHandler(N)] is faithfully stored
 			// and retrievable — a prerequisite for the runtime sorting logic.
-			Func<string, LocalSignalHandlerAttribute> getAttr = methodName =>
+			Func<string, SignalHandlerAttribute> getAttr = methodName =>
 				typeof(PrioritySignalHandlers)
 					.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static)
-					.GetCustomAttribute<LocalSignalHandlerAttribute>();
+					.GetCustomAttribute<SignalHandlerAttribute>();
 
 			Assert.AreEqual(10, getAttr(nameof(PrioritySignalHandlers.HandlerPrio10)).Priority);
 			Assert.AreEqual(5,  getAttr(nameof(PrioritySignalHandlers.HandlerPrio5)).Priority);

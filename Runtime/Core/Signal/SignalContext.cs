@@ -4,11 +4,11 @@
 
 using System;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	/// <summary>
 	/// Dispatches signals synchronously by invoking the provided dispatch callback immediately.
-	/// The callback is a closure created by LocalCommandManager that routes the signal
+	/// The callback is a closure created by CommandManager that routes the signal
 	/// to the appropriate registered handlers.
 	/// </summary>
 	internal class SignalContext : ISignalContext

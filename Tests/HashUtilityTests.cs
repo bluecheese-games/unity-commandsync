@@ -2,11 +2,11 @@
 // Copyright (c) 2026 BlueCheese Games All rights reserved
 //
 
-using BlueCheese.LocalCommands.Core;
+using BlueCheese.CommandSync.Core;
 using NUnit.Framework;
 using System;
 
-namespace BlueCheese.LocalCommands.Tests
+namespace BlueCheese.CommandSync.Tests
 {
 	[TestFixture]
 	public class HashUtilityTests

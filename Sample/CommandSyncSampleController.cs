@@ -2,9 +2,9 @@
 // Copyright (c) 2026 BlueCheese Games All rights reserved
 //
 
-using BlueCheese.LocalCommands.Core;
-using BlueCheese.LocalCommands.Sample.Commands;
-using BlueCheese.LocalCommands.Sample.Data;
+using BlueCheese.CommandSync.Core;
+using BlueCheese.CommandSync.Sample.Commands;
+using BlueCheese.CommandSync.Sample.Data;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -16,7 +16,7 @@ using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.Profiling;
 
-public class UnityLogger : BlueCheese.LocalCommands.Core.ILogger
+public class UnityLogger : BlueCheese.CommandSync.Core.ILogger
 {
 	public void Log(string message) => Debug.Log(message);
 
@@ -100,14 +100,14 @@ public class DummyCommandSyncService : ISyncService
 	}
 }
 
-public class LocalCommandsSampleController : MonoBehaviour
+public class CommandSyncSampleController : MonoBehaviour
 {
 	[SerializeField] private Transform _buttonsContainer;
 	[SerializeField] private GameObject _buttonPrefab;
 	[SerializeField] private TextMeshProUGUI _debugText;
 	[SerializeField] private string _syncEndpoint = "https://localhost:7259/sync";
 
-	private LocalCommandManager _localCommandManager;
+	private CommandManager _commandManager;
 	private IReadOnlyDataManager _dataManager;
 
 	private async void Awake()
@@ -125,17 +125,17 @@ public class LocalCommandsSampleController : MonoBehaviour
 		var syncService = new UnityHttpSyncService(_syncEndpoint, serializer);
 		var commandsDataStorage = new PlayerPrefsDataStorage(serializer, "Commands");
 		var config = Config.Create();
-		_localCommandManager = new LocalCommandManager(dataManager,
+		_commandManager = new CommandManager(dataManager,
 			logger: logger,
 			config: config,
 			timeProvider: timeProvider,
 			commandsDataStorage: commandsDataStorage,
 			syncService: syncService);
-		_localCommandManager.RegisterCommands(typeof(SampleCommands).Assembly);
+		_commandManager.RegisterCommands(typeof(SampleCommands).Assembly);
 
 		_dataManager = dataManager;
 
-		await _localCommandManager.LoadData();
+		await _commandManager.LoadData();
 
 		Dump();
 	}
@@ -156,7 +156,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void AddValue()
 	{
 		Profiler.BeginSample(nameof(AddValue));
-		_localCommandManager.ExecuteCommand(SampleCommands.AddValue, new SampleCommandArgs { Value = 10 });
+		_commandManager.ExecuteCommand(SampleCommands.AddValue, new SampleCommandArgs { Value = 10 });
 		Profiler.EndSample();
 
 		Dump();
@@ -165,7 +165,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void AddValueByName()
 	{
 		Profiler.BeginSample(nameof(AddValueByName));
-		_localCommandManager.ExecuteCommand(nameof(SampleCommands.AddValue), new SampleCommandArgs { Value = 10 });
+		_commandManager.ExecuteCommand(nameof(SampleCommands.AddValue), new SampleCommandArgs { Value = 10 });
 		Profiler.EndSample();
 
 		Dump();
@@ -174,7 +174,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void ResetValue()
 	{
 		Profiler.BeginSample(nameof(ResetValue));
-		_localCommandManager.ExecuteCommand(SampleCommands.RESET_COMMAND_NAME);
+		_commandManager.ExecuteCommand(SampleCommands.RESET_COMMAND_NAME);
 		Profiler.EndSample();
 
 		Dump();
@@ -183,7 +183,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void ResetAndAddValue()
 	{
 		Profiler.BeginSample(nameof(ResetAndAddValue));
-		_localCommandManager.ExecuteCommand(SampleCommands.ResetAndAddValue, new SampleCommandArgs { Value = 20 });
+		_commandManager.ExecuteCommand(SampleCommands.ResetAndAddValue, new SampleCommandArgs { Value = 20 });
 		Profiler.EndSample();
 
 		Dump();
@@ -192,7 +192,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void AddValueMultipleTimes()
 	{
 		Profiler.BeginSample(nameof(AddValueMultipleTimes));
-		_localCommandManager.ExecuteCommand(SampleCommands.AddValueMultipleTimes, new SampleCommandArgs { Value = 5 });
+		_commandManager.ExecuteCommand(SampleCommands.AddValueMultipleTimes, new SampleCommandArgs { Value = 5 });
 		Profiler.EndSample();
 
 		Dump();
@@ -201,7 +201,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void NestedWriteValue()
 	{
 		Profiler.BeginSample(nameof(NestedWriteValue));
-		_localCommandManager.ExecuteCommand(SampleCommands.NestedWriteValue);
+		_commandManager.ExecuteCommand(SampleCommands.NestedWriteValue);
 		Profiler.EndSample();
 
 		Dump();
@@ -210,7 +210,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void AddFloatValue()
 	{
 		Profiler.BeginSample(nameof(AddFloatValue));
-		_localCommandManager.ExecuteCommand(SampleCommands.AddFloatValue, new SampleCommandArgs { FloatValue = 1000000.5f });
+		_commandManager.ExecuteCommand(SampleCommands.AddFloatValue, new SampleCommandArgs { FloatValue = 1000000.5f });
 		Profiler.EndSample();
 		Dump();
 	}
@@ -218,7 +218,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void AddRandomDoubleValue()
 	{
 		Profiler.BeginSample(nameof(AddRandomDoubleValue));
-		_localCommandManager.ExecuteCommand(SampleCommands.AddRandomDoubleValue);
+		_commandManager.ExecuteCommand(SampleCommands.AddRandomDoubleValue);
 		Profiler.EndSample();
 		Dump();
 	}
@@ -226,7 +226,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void LogValue()
 	{
 		Profiler.BeginSample(nameof(LogValue));
-		_localCommandManager.ExecuteCommand(SampleCommands.LogValue);
+		_commandManager.ExecuteCommand(SampleCommands.LogValue);
 		Profiler.EndSample();
 
 		Dump();
@@ -235,7 +235,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void FailingCommand()
 	{
 		Profiler.BeginSample(nameof(FailingCommand));
-		_localCommandManager.ExecuteCommand(SampleCommands.FailingCommand);
+		_commandManager.ExecuteCommand(SampleCommands.FailingCommand);
 		Profiler.EndSample();
 
 		Dump();
@@ -244,7 +244,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void FailingCommandWithException()
 	{
 		Profiler.BeginSample(nameof(FailingCommandWithException));
-		_localCommandManager.ExecuteCommand(SampleCommands.FailingCommandWithException);
+		_commandManager.ExecuteCommand(SampleCommands.FailingCommandWithException);
 		Profiler.EndSample();
 
 		Dump();
@@ -253,7 +253,7 @@ public class LocalCommandsSampleController : MonoBehaviour
 	private void SetText()
 	{
 		Profiler.BeginSample(nameof(SetText));
-		_localCommandManager.ExecuteCommand(SampleCommands.SetText, new TextCommandArgs { Text = "Current time: " + DateTime.Now.ToString("T") });
+		_commandManager.ExecuteCommand(SampleCommands.SetText, new TextCommandArgs { Text = "Current time: " + DateTime.Now.ToString("T") });
 		Profiler.EndSample();
 
 		Dump();
@@ -261,13 +261,13 @@ public class LocalCommandsSampleController : MonoBehaviour
 
 	private async Task Sync()
 	{
-		await _localCommandManager.Sync();
+		await _commandManager.Sync();
 	}
 
 	private void Reset()
 	{
 		PlayerPrefs.DeleteAll();
-		_localCommandManager.ClearHistory();
+		_commandManager.ClearHistory();
 		Dump();
 	}
 

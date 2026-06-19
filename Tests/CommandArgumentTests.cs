@@ -2,16 +2,16 @@
 // Copyright (c) 2026 BlueCheese Games All rights reserved
 //
 
-using BlueCheese.LocalCommands.Core;
+using BlueCheese.CommandSync.Core;
 using NUnit.Framework;
 using System.Reflection;
 
-namespace BlueCheese.LocalCommands.Tests
+namespace BlueCheese.CommandSync.Tests
 {
 	[TestFixture]
 	public class CommandArgumentTests
 	{
-		private LocalCommandManager _manager;
+		private CommandManager _manager;
 		private DataManager _dataManager;
 
 		[SetUp]
@@ -23,7 +23,7 @@ namespace BlueCheese.LocalCommands.Tests
 			// Initializing with public factory method
 			var config = Config.Create();
 
-			_manager = new LocalCommandManager(
+			_manager = new CommandManager(
 				_dataManager,
 				new FakeLogger(),
 				config,

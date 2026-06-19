@@ -9,10 +9,10 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	/// <summary>
-	/// Public facade over the LocalCommands pipeline. It wires together focused collaborators
+	/// Public facade over the CommandSync pipeline. It wires together focused collaborators
 	/// (<see cref="CommandRegistry"/>, <see cref="CommandExecutor"/>, <see cref="SignalDispatcher"/>,
 	/// <see cref="ExternalEventBus"/>, <see cref="CommandHistoryStore"/>, <see cref="SyncCoordinator"/>)
 	/// and exposes a single entry point for command authors.
@@ -22,7 +22,7 @@ namespace BlueCheese.LocalCommands.Core
 	/// same thread (typically the Unity main thread). Only <see cref="Sync"/> may be awaited
 	/// concurrently — it is guarded against re-entrancy and must not run while a command executes.
 	/// </summary>
-	public class LocalCommandManager
+	public class CommandManager
 	{
 		private readonly CommandRegistry _registry;
 		private readonly ExternalEventBus _eventBus;
@@ -37,7 +37,7 @@ namespace BlueCheese.LocalCommands.Core
 		/// falls back to a sensible default when omitted, so callers can supply just the ones they
 		/// want to override — ideally via named arguments.
 		/// </summary>
-		public LocalCommandManager(
+		public CommandManager(
 			IDataManager dataManager,
 			ILogger logger = null,
 			IConfig config = null,
@@ -59,7 +59,7 @@ namespace BlueCheese.LocalCommands.Core
 			if (ReferenceEquals(commandsDataStorage, internalDataManager.Storage))
 			{
 				logger.LogWarning(
-					"LocalCommandManager: commandsDataStorage is the same instance as the DataManager's storage. " +
+					"CommandManager: commandsDataStorage is the same instance as the DataManager's storage. " +
 					"Pass a separate IDataStorage for command history to avoid key collisions.");
 			}
 
@@ -164,7 +164,7 @@ namespace BlueCheese.LocalCommands.Core
 			else if (_ownerThreadId != current)
 			{
 				throw new InvalidOperationException(
-					$"LocalCommandManager is not thread-safe: it was first used on thread {_ownerThreadId} " +
+					$"CommandManager is not thread-safe: it was first used on thread {_ownerThreadId} " +
 					$"but accessed from thread {current}. Call all command methods from the same thread.");
 			}
 		}

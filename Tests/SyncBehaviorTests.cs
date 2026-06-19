@@ -2,7 +2,7 @@
 // Copyright (c) 2026 BlueCheese Games All rights reserved
 //
 
-using BlueCheese.LocalCommands.Core;
+using BlueCheese.CommandSync.Core;
 using NUnit.Framework;
 using System;
 using System.Collections.Generic;
@@ -10,12 +10,12 @@ using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 
-namespace BlueCheese.LocalCommands.Tests
+namespace BlueCheese.CommandSync.Tests
 {
 	[TestFixture]
 	public class SyncBehaviorTests
 	{
-		private LocalCommandManager _manager;
+		private CommandManager _manager;
 		private DataManager _dataManager;
 		private FakeDataStorage _storage;
 		private Config _config;
@@ -33,7 +33,7 @@ namespace BlueCheese.LocalCommands.Tests
 		{
 			// Arrange: Inject a fake sync service that always returns Success
 			var successSyncService = new FakeCommandSyncService(); // Returns a successful SyncResponse by default
-			_manager = new LocalCommandManager(_dataManager, new FakeLogger(), _config, new SystemTimeProvider(), _storage, successSyncService);
+			_manager = new CommandManager(_dataManager, new FakeLogger(), _config, new SystemTimeProvider(), _storage, successSyncService);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			// Act: Execute a command to populate history, then sync
@@ -51,7 +51,7 @@ namespace BlueCheese.LocalCommands.Tests
 		{
 			// Arrange: Inject a custom fake sync service that returns Desync
 			var failingSyncService = new FailingCommandSyncService();
-			_manager = new LocalCommandManager(_dataManager, new FakeLogger(), _config, new SystemTimeProvider(), _storage, failingSyncService);
+			_manager = new CommandManager(_dataManager, new FakeLogger(), _config, new SystemTimeProvider(), _storage, failingSyncService);
 			_manager.RegisterCommands(Assembly.GetExecutingAssembly());
 
 			// Act: Execute a command and attempt to sync
@@ -89,7 +89,7 @@ namespace BlueCheese.LocalCommands.Tests
 			var dataManager = new DataManager(storage, new NewtonsoftJsonSerializer());
 			var syncService = new CountingSyncService();
 
-			var manager = new LocalCommandManager(
+			var manager = new CommandManager(
 				dataManager, new FakeLogger(), Config.Create(),
 				new SystemTimeProvider(), storage, syncService);
 			manager.RegisterCommands(Assembly.GetExecutingAssembly());
@@ -122,9 +122,6 @@ namespace BlueCheese.LocalCommands.Tests
 	// Verifies that persisted CommandCall.Args are correctly deserialized after an app restart.
 	// When history is reloaded from storage, Args come back as JObject (Newtonsoft) instead of
 	// the original typed struct. ReplayCommand must handle this transparently.
-	// Verifies that persisted CommandCall.Args are correctly deserialized after an app restart.
-	// When history is reloaded from storage, Args come back as JObject (Newtonsoft) instead of
-	// the original typed struct. ReplayCommand must handle this transparently.
 	//
 	// Setup: the history storage is shared across sessions (it survives the restart),
 	// but the data storage is fresh in session 2 — replay is meant to reconstruct state
@@ -140,7 +137,7 @@ namespace BlueCheese.LocalCommands.Tests
 
 			// Session 1: execute a command — data and history are written
 			var dataManager1 = new DataManager(new FakeDataStorage(), serializer);
-			var manager1 = new LocalCommandManager(
+			var manager1 = new CommandManager(
 				dataManager1, new FakeLogger(), Config.Create(),
 				new SystemTimeProvider(), historyStorage);
 			manager1.RegisterCommands(Assembly.GetExecutingAssembly());
@@ -149,7 +146,7 @@ namespace BlueCheese.LocalCommands.Tests
 			// Session 2: fresh data storage, same history storage (simulates restart with lost data)
 			// Args in the reloaded history may now be JObject instead of TestArgs
 			var dataManager2 = new DataManager(new FakeDataStorage(), serializer);
-			var manager2 = new LocalCommandManager(
+			var manager2 = new CommandManager(
 				dataManager2, new FakeLogger(), Config.Create(),
 				new SystemTimeProvider(), historyStorage);
 			manager2.RegisterCommands(Assembly.GetExecutingAssembly());
@@ -181,7 +178,7 @@ namespace BlueCheese.LocalCommands.Tests
 				[typeof(TestScoreData).FullName] = serializer.Serialize(new TestScoreData { Score = 999 }, typeof(TestScoreData)),
 			};
 
-			var manager = new LocalCommandManager(
+			var manager = new CommandManager(
 				dataManager, new FakeLogger(), Config.Create(),
 				new SystemTimeProvider(), storage, new DesyncThenFetchSyncService(serverState));
 			manager.RegisterCommands(Assembly.GetExecutingAssembly());

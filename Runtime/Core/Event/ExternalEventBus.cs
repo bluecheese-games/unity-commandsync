@@ -5,7 +5,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	// Holds external event subscribers and dispatches the events queued during a command execution.
 	internal sealed class ExternalEventBus

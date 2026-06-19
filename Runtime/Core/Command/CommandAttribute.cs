@@ -4,19 +4,19 @@
 
 using System;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
-	public class LocalCommandAttribute : Attribute
+	public class CommandAttribute : Attribute
 	{
 		public string Name { get; private set; }
 
-		public LocalCommandAttribute()
+		public CommandAttribute()
 		{
 			Name = null; // Default to null, which means the command name will be derived from the class name
 		}
 
-		public LocalCommandAttribute(string name)
+		public CommandAttribute(string name)
 		{
 			Name = name;
 		}

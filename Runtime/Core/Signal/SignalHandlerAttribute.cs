@@ -4,7 +4,7 @@
 
 using System;
 
-namespace BlueCheese.LocalCommands.Core
+namespace BlueCheese.CommandSync.Core
 {
 	/// <summary>
 	/// Marks a static method as a local signal handler.
@@ -18,7 +18,7 @@ namespace BlueCheese.LocalCommands.Core
 	/// implicitly when the triggering command is replayed.
 	/// </summary>
 	[AttributeUsage(AttributeTargets.Method, Inherited = false, AllowMultiple = false)]
-	public class LocalSignalHandlerAttribute : Attribute
+	public class SignalHandlerAttribute : Attribute
 	{
 		/// <summary>
 		/// Execution order relative to other handlers for the same signal type.
@@ -26,7 +26,7 @@ namespace BlueCheese.LocalCommands.Core
 		/// </summary>
 		public int Priority { get; }
 
-		public LocalSignalHandlerAttribute(int priority = 0)
+		public SignalHandlerAttribute(int priority = 0)
 		{
 			Priority = priority;
 		}

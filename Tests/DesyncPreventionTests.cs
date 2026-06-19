@@ -2,14 +2,14 @@
 // Copyright (c) 2026 BlueCheese Games All rights reserved
 //
 
-using BlueCheese.LocalCommands.Core;
+using BlueCheese.CommandSync.Core;
 using NUnit.Framework;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 
-namespace BlueCheese.LocalCommands.Tests
+namespace BlueCheese.CommandSync.Tests
 {
 	// Verifies that GetStateHash is deterministic regardless of type enumeration order.
 	[TestFixture]
@@ -67,7 +67,7 @@ namespace BlueCheese.LocalCommands.Tests
 	[TestFixture]
 	public class DesyncPreventionTests
 	{
-		private LocalCommandManager _manager;
+		private CommandManager _manager;
 		private DataManager _dataManager;
 
 		[SetUp]
@@ -78,7 +78,7 @@ namespace BlueCheese.LocalCommands.Tests
 			_dataManager = new DataManager(storage, serializer);
 
 			var config = Config.Create();
-			_manager = new LocalCommandManager(
+			_manager = new CommandManager(
 				_dataManager,
 				new FakeLogger(),
 				config,

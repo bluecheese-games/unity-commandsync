@@ -4,7 +4,7 @@
 
 using System;
 
-namespace BlueCheese.LocalCommands.Sample.Data
+namespace BlueCheese.CommandSync.Sample.Data
 {
 	[Serializable]
 	public struct SampleData : IEquatable<SampleData>
