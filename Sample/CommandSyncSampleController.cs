@@ -5,6 +5,7 @@
 using BlueCheese.CommandSync.Core;
 using BlueCheese.CommandSync.Sample.Commands;
 using BlueCheese.CommandSync.Sample.Data;
+using BlueCheese.CommandSync.Sample.MockServer;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
@@ -122,7 +123,11 @@ public class CommandSyncSampleController : MonoBehaviour
 		var dataStorage = new PlayerPrefsDataStorage(serializer, "Sample");
 		var dataManager = new DataManager(dataStorage, serializer);
 		var timeProvider = new SystemTimeProvider();
-		var syncService = new UnityHttpSyncService(_syncEndpoint, serializer);
+		// In-process mock backend that replays commands and reconciles by state hash (see MockServer assembly).
+		// Swap MockServerSyncService for UnityHttpSyncService(_syncEndpoint, serializer) to target a real server.
+		var mockServer = new MockCommandServer(serializer);
+		mockServer.RegisterCommands(typeof(SampleCommands).Assembly);
+		var syncService = new MockServerSyncService(mockServer, serializer);
 		var commandsDataStorage = new PlayerPrefsDataStorage(serializer, "Commands");
 		var config = Config.Create();
 		_commandManager = new CommandManager(dataManager,
