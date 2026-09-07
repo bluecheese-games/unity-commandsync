@@ -11,13 +11,15 @@ namespace BlueCheese.CommandSync.Core
 		private readonly ILogger _logger;
 		private readonly IConfig _config;
 		private readonly ITimeProvider _timeProvider;
+		private readonly IPluginServices _pluginServices;
 
-		public SignalDispatcher(CommandRegistry registry, ILogger logger, IConfig config, ITimeProvider timeProvider)
+		public SignalDispatcher(CommandRegistry registry, ILogger logger, IConfig config, ITimeProvider timeProvider, IPluginServices pluginServices)
 		{
 			_registry = registry;
 			_logger = logger;
 			_config = config;
 			_timeProvider = timeProvider;
+			_pluginServices = pluginServices;
 		}
 
 		// Builds the SignalContext handed to the root command; sending a signal re-enters Dispatch.
@@ -74,7 +76,7 @@ namespace BlueCheese.CommandSync.Core
 				// Handlers share the same state and data as the triggering command
 				var handlerContext = new CommandContext(
 					_config, data, _logger,
-					state, _timeProvider, handlerRng, handlerSignalContext, eventContext);
+					state, _timeProvider, handlerRng, handlerSignalContext, eventContext, _pluginServices);
 
 				handler.Execute(handlerContext, payload);
 

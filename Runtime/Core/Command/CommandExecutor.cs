@@ -16,6 +16,7 @@ namespace BlueCheese.CommandSync.Core
 		private readonly IConfig _config;
 		private readonly ITimeProvider _timeProvider;
 		private readonly ISerializer _serializer;
+		private readonly IPluginServices _pluginServices;
 
 		public CommandExecutor(
 			CommandRegistry registry,
@@ -26,7 +27,8 @@ namespace BlueCheese.CommandSync.Core
 			ILogger logger,
 			IConfig config,
 			ITimeProvider timeProvider,
-			ISerializer serializer)
+			ISerializer serializer,
+			IPluginServices pluginServices)
 		{
 			_registry = registry;
 			_signalDispatcher = signalDispatcher;
@@ -37,6 +39,7 @@ namespace BlueCheese.CommandSync.Core
 			_config = config;
 			_timeProvider = timeProvider;
 			_serializer = serializer;
+			_pluginServices = pluginServices;
 		}
 
 		public void Execute(Guid commandId, string commandName, object args, bool saveCommand = true)
@@ -65,7 +68,7 @@ namespace BlueCheese.CommandSync.Core
 			var occurrenceCounters = new Dictionary<Type, int>();
 			var eventContext = new EventContext();
 			var signalContext = _signalDispatcher.CreateRootContext(commandId, data, state, occurrenceCounters, eventContext);
-			var context = new CommandContext(_config, data, _logger, state, _timeProvider, rng, signalContext, eventContext);
+			var context = new CommandContext(_config, data, _logger, state, _timeProvider, rng, signalContext, eventContext, _pluginServices);
 
 			// Execute the command
 			commandDef.Execute(context, args);
