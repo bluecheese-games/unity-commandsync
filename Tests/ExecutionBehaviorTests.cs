@@ -1,8 +1,4 @@
-//
-// Copyright (c) 2026 BlueCheese Games All rights reserved
-//
-
-using BlueCheese.CommandSync.Core;
+﻿using BlueCheese.CommandSync.Core;
 using NUnit.Framework;
 using Newtonsoft.Json.Linq;
 using System;

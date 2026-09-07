@@ -1,8 +1,4 @@
-//
-// Copyright (c) 2026 BlueCheese Games All rights reserved
-//
-
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 

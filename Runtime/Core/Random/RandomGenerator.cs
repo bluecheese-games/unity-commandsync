@@ -1,8 +1,4 @@
-//
-// Copyright (c) 2026 BlueCheese Games All rights reserved
-//
-
-namespace BlueCheese.CommandSync.Core
+﻿namespace BlueCheese.CommandSync.Core
 {
 	/// <summary>
 	/// Deterministic pseudo-random generator based on the SplitMix64 algorithm.

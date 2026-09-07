@@ -1,8 +1,4 @@
-//
-// Copyright (c) 2026 BlueCheese Games All rights reserved
-//
-
-using Newtonsoft.Json;
+﻿using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Newtonsoft.Json.Serialization;
 using System;

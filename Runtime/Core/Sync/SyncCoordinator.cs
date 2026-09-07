@@ -1,8 +1,4 @@
-//
-// Copyright (c) 2026 BlueCheese Games All rights reserved
-//
-
-using System.Threading;
+﻿using System.Threading;
 using System.Threading.Tasks;
 
 namespace BlueCheese.CommandSync.Core

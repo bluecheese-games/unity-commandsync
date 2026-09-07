@@ -1,8 +1,4 @@
-//
-// Copyright (c) 2026 BlueCheese Games All rights reserved
-//
-
-namespace BlueCheese.CommandSync.Core
+﻿namespace BlueCheese.CommandSync.Core
 {
 	// Extends IDataManager with GetBox<T> for direct mutable access.
 	// Kept internal so command authors cannot bypass dirty-tracking via the public interface.
