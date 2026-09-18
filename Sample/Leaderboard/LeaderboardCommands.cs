@@ -4,13 +4,6 @@ using BlueCheese.CommandSync.Core;
 
 namespace BlueCheese.CommandSync.Sample.Leaderboard
 {
-	public struct SubmitScoreArgs
-	{
-		public string LeaderboardId;
-		public string PlayerId;
-		public long Score;
-	}
-
 	public static class LeaderboardCommands
 	{
 		[Command]
@@ -52,6 +45,23 @@ namespace BlueCheese.CommandSync.Sample.Leaderboard
 				}
 
 				data.Boards = boards.ToArray(); // new array reference: required for the change to be detected (see LeaderboardsData.Equals)
+			});
+		}
+
+		[Command]
+		public static void ClearLeaderboard(CommandContext context, ClearLeaderboardArgs args)
+		{
+			context.Data.Update((ref LeaderboardsData data) =>
+			{
+				var boards = (data.Boards ?? Array.Empty<LeaderboardBoard>()).ToList();
+				int boardIndex = boards.FindIndex(b => b.Id == args.LeaderboardId);
+				if (boardIndex < 0 || boards[boardIndex].Entries == null || boards[boardIndex].Entries.Length == 0)
+				{
+					return; // already empty: leave data.Boards untouched so this is correctly a no-op, not a wasted history entry
+				}
+
+				boards[boardIndex] = new LeaderboardBoard { Id = args.LeaderboardId, Entries = Array.Empty<LeaderboardEntry>() };
+				data.Boards = boards.ToArray();
 			});
 		}
 	}

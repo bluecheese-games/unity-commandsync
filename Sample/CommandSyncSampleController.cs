@@ -1,404 +1,112 @@
-﻿using BlueCheese.CommandSync.Core;
+using BlueCheese.CommandSync.Core;
 using BlueCheese.CommandSync.Sample.Commands;
-using BlueCheese.CommandSync.Sample.Data;
+using BlueCheese.CommandSync.Sample.Leaderboard;
 using BlueCheese.CommandSync.Sample.MockServer;
-using Newtonsoft.Json;
-using System;
-using System.Collections.Generic;
-using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
-using UnityEngine.Networking;
-using UnityEngine.Profiling;
 
-public class UnityLogger : BlueCheese.CommandSync.Core.ILogger
-{
-	public void Log(string message) => Debug.Log(message);
-
-	public void LogWarning(string message) => Debug.LogWarning(message);
-
-	public void LogError(string message) => Debug.LogError(message);
-
-	public void LogException(Exception exception) => Debug.LogException(exception);
-}
-
-public class PlayerPrefsDataStorage : IDataStorage
-{
-	private readonly ISerializer _serializer;
-	private readonly string _prefix;
-
-	public PlayerPrefsDataStorage(ISerializer serializer, string prefix)
-	{
-		_serializer = serializer;
-		_prefix = prefix ?? "k";
-	}
-
-	public void Save<T>(string key, T data)
-	{
-		string serializedData = _serializer.Serialize(data);
-		string fullKey = $"{_prefix}_{key}";
-		PlayerPrefs.SetString(fullKey, serializedData);
-	}
-
-	public bool TryLoad<T>(string key, out T data)
-	{
-		string fullKey = $"{_prefix}_{key}";
-		if (PlayerPrefs.HasKey(fullKey))
-		{
-			string serializedData = PlayerPrefs.GetString(fullKey);
-			data = _serializer.Deserialize<T>(serializedData);
-			return true;
-		}
-		data = default;
-		return false;
-	}
-
-	public void Save(string key, object data, Type type)
-	{
-		string serializedData = _serializer.Serialize(data, type);
-		string fullKey = $"{_prefix}_{key}";
-		PlayerPrefs.SetString(fullKey, serializedData);
-	}
-
-	public bool TryLoad(string key, Type type, out object data)
-	{
-		string fullKey = $"{_prefix}_{key}";
-		if (PlayerPrefs.HasKey(fullKey))
-		{
-			string serializedData = PlayerPrefs.GetString(fullKey);
-			data = _serializer.Deserialize(serializedData, type);
-			return true;
-		}
-		data = null;
-		return false;
-	}
-}
-
-public class DummyCommandSyncService : ISyncService
-{
-	public Task<SyncResponse> SyncAsync(SyncRequest request, CancellationToken cancellationToken = default)
-	{
-		Debug.Log($"Syncing {request.Commands.Length} commands to server...");
-		foreach (var cmd in request.Commands)
-		{
-			Debug.Log($" - {cmd}");
-		}
-
-		// Simulate a successful sync with no conflicts
-		return Task.FromResult(SyncResponse.Ok());
-	}
-
-	public Task<FetchResponse> FetchAsync(CancellationToken cancellationToken = default)
-	{
-		// Simulate fetching full state from server (empty in this dummy implementation)
-		return Task.FromResult(FetchResponse.Ok(new()));
-	}
-}
-
-public class CommandSyncSampleController : MonoBehaviour
+/// <summary>
+/// Player dashboard for the CommandSync sample: log in as any Id (no auth), view/edit that player's
+/// profile (name, XP), and interact with the "xp" leaderboard (see Sample/Leaderboard). Everything is
+/// built procedurally at runtime into the existing "Buttons" column of the sample scene, so the scene
+/// asset itself never needs to be edited by hand.
+///
+/// Split across several files by responsibility (all part of this same partial class):
+/// - CommandSyncSampleController.cs (this file): fields, lifecycle, manager bootstrap/rebuild.
+/// - CommandSyncSampleController.UI.cs: procedural UI construction helpers.
+/// - CommandSyncSampleController.Actions.cs: button click handlers.
+/// - CommandSyncSampleController.Display.cs: read-model refresh (profile/leaderboard text, JSON dump).
+/// </summary>
+public partial class CommandSyncSampleController : MonoBehaviour
 {
 	[SerializeField] private Transform _buttonsContainer;
 	[SerializeField] private GameObject _buttonPrefab;
 	[SerializeField] private TextMeshProUGUI _debugText;
 	[SerializeField] private string _syncEndpoint = "https://localhost:7259/sync";
 
+	private const string XpLeaderboardId = "xp";
+	private const int LeaderboardTopCount = 10;
+
 	private CommandManager _commandManager;
 	private IReadOnlyDataManager _dataManager;
+	private string _currentPlayerId;
+
+	private Transform _contentRoot;
+
+	private ISerializer _serializer;
+	private PlayerPrefsDataStorage _clientDataStorage;
+	private PlayerPrefsDataStorage _clientCommandsStorage;
+	private PlayerPrefsDataStorage _mockServerDataStorage;
+	private MockCommandServer _mockServer;
+
+	private TMP_InputField _loginIdInput;
+	private TextMeshProUGUI _profileInfoText;
+	private TMP_InputField _playerNameInput;
+	private TextMeshProUGUI _leaderboardText;
+	private TextMeshProUGUI _myRankText;
 
 	private async void Awake()
 	{
+		// Build the UI synchronously first: Awake() always finishes (up to the first await) before
+		// Start() runs, so this guarantees every UI element exists before InitializeManager()'s
+		// continuation (which may resume after Start() has had a chance to run) touches them.
+		SetupScrollableContent();
+		BuildLoginSection();
+		BuildProfileSection();
+		BuildLeaderboardSection();
+		BuildUtilitySection();
+
 		await InitializeManager();
 	}
 
 	private async Task InitializeManager()
 	{
-		var logger = new UnityLogger();
-		var serializer = new NewtonsoftJsonSerializer();
-		var dataStorage = new PlayerPrefsDataStorage(serializer, "Sample");
-		var dataManager = new DataManager(dataStorage, serializer);
-		var timeProvider = new SystemTimeProvider();
+		_serializer = new NewtonsoftJsonSerializer();
+
 		// In-process mock backend that replays commands and reconciles by state hash (see MockServer assembly).
+		// Its storage must persist across Play Mode restarts too (a separate PlayerPrefs prefix from the
+		// client's own), or the "server" forgets everything on every restart while the client's local data
+		// does not — which looks exactly like the server having reset, and reliably desyncs on the next sync.
+		_mockServerDataStorage = new PlayerPrefsDataStorage(_serializer, "MockServerState");
+		_mockServer = CreateMockServer(_mockServerDataStorage);
+
+		_clientDataStorage = new PlayerPrefsDataStorage(_serializer, "Sample");
+		_clientCommandsStorage = new PlayerPrefsDataStorage(_serializer, "Commands");
+		await CreateClientManager();
+
+		RefreshProfileView();
+		RefreshLeaderboardView();
+		Dump();
+	}
+
+	private MockCommandServer CreateMockServer(IDataStorage dataStorage)
+	{
+		var mockServer = new MockCommandServer(_serializer, dataStorage);
+		mockServer.RegisterCommands(typeof(PlayerCommands).Assembly);
+		mockServer.RegisterCommands(typeof(LeaderboardCommands).Assembly); // must replay score submissions too, or every Submit Score desyncs
+		return mockServer;
+	}
+
+	// (Re)builds the client-side manager against _clientDataStorage/_clientCommandsStorage and wires it to
+	// whatever _mockServer currently is. Called once at startup, and again after Clear Client Data / Clear
+	// All, since neither CommandManager nor MockServerSyncService can be repointed after construction.
+	private async Task CreateClientManager()
+	{
 		// Swap MockServerSyncService for UnityHttpSyncService(_syncEndpoint, serializer) to target a real server.
-		var mockServer = new MockCommandServer(serializer);
-		mockServer.RegisterCommands(typeof(SampleCommands).Assembly);
-		var syncService = new MockServerSyncService(mockServer, serializer);
-		var commandsDataStorage = new PlayerPrefsDataStorage(serializer, "Commands");
-		var config = Config.Create();
+		var syncService = new MockServerSyncService(_mockServer, _serializer);
+		var dataManager = new DataManager(_clientDataStorage, _serializer);
 		_commandManager = new CommandManager(dataManager,
-			logger: logger,
-			config: config,
-			timeProvider: timeProvider,
-			commandsDataStorage: commandsDataStorage,
+			logger: new UnityLogger(),
+			config: Config.Create(),
+			timeProvider: new SystemTimeProvider(),
+			commandsDataStorage: _clientCommandsStorage,
 			syncService: syncService);
-		_commandManager.RegisterCommands(typeof(SampleCommands).Assembly);
+		_commandManager.RegisterCommands(typeof(PlayerCommands).Assembly);
+		_commandManager.AddPlugin(new LeaderboardPlugin()); // also auto-registers LeaderboardCommands on the client
 
 		_dataManager = dataManager;
 
 		await _commandManager.LoadData();
-
-		Dump();
-	}
-
-	private void Dump()
-	{
-		var sampleData = _dataManager.Get<SampleData>();
-		var sampleData2 = _dataManager.Get<SampleData2>();
-		var dumpObj = new
-		{
-			SampleData = sampleData,
-			SampleData2 = sampleData2
-		};
-		string jsonData = JsonConvert.SerializeObject(dumpObj, Formatting.Indented);
-		_debugText.text = jsonData;
-	}
-
-	private void AddValue()
-	{
-		Profiler.BeginSample(nameof(AddValue));
-		_commandManager.ExecuteCommand(SampleCommands.AddValue, new SampleCommandArgs { Value = 10 });
-		Profiler.EndSample();
-
-		Dump();
-	}
-
-	private void AddValueByName()
-	{
-		Profiler.BeginSample(nameof(AddValueByName));
-		_commandManager.ExecuteCommand(nameof(SampleCommands.AddValue), new SampleCommandArgs { Value = 10 });
-		Profiler.EndSample();
-
-		Dump();
-	}
-
-	private void ResetValue()
-	{
-		Profiler.BeginSample(nameof(ResetValue));
-		_commandManager.ExecuteCommand(SampleCommands.RESET_COMMAND_NAME);
-		Profiler.EndSample();
-
-		Dump();
-	}
-
-	private void ResetAndAddValue()
-	{
-		Profiler.BeginSample(nameof(ResetAndAddValue));
-		_commandManager.ExecuteCommand(SampleCommands.ResetAndAddValue, new SampleCommandArgs { Value = 20 });
-		Profiler.EndSample();
-
-		Dump();
-	}
-
-	private void AddValueMultipleTimes()
-	{
-		Profiler.BeginSample(nameof(AddValueMultipleTimes));
-		_commandManager.ExecuteCommand(SampleCommands.AddValueMultipleTimes, new SampleCommandArgs { Value = 5 });
-		Profiler.EndSample();
-
-		Dump();
-	}
-
-	private void NestedWriteValue()
-	{
-		Profiler.BeginSample(nameof(NestedWriteValue));
-		_commandManager.ExecuteCommand(SampleCommands.NestedWriteValue);
-		Profiler.EndSample();
-
-		Dump();
-	}
-
-	private void AddFloatValue()
-	{
-		Profiler.BeginSample(nameof(AddFloatValue));
-		_commandManager.ExecuteCommand(SampleCommands.AddFloatValue, new SampleCommandArgs { FloatValue = 1000000.5f });
-		Profiler.EndSample();
-		Dump();
-	}
-
-	private void AddRandomDoubleValue()
-	{
-		Profiler.BeginSample(nameof(AddRandomDoubleValue));
-		_commandManager.ExecuteCommand(SampleCommands.AddRandomDoubleValue);
-		Profiler.EndSample();
-		Dump();
-	}
-
-	private void LogValue()
-	{
-		Profiler.BeginSample(nameof(LogValue));
-		_commandManager.ExecuteCommand(SampleCommands.LogValue);
-		Profiler.EndSample();
-
-		Dump();
-	}
-
-	private void FailingCommand()
-	{
-		Profiler.BeginSample(nameof(FailingCommand));
-		_commandManager.ExecuteCommand(SampleCommands.FailingCommand);
-		Profiler.EndSample();
-
-		Dump();
-	}
-
-	private void FailingCommandWithException()
-	{
-		Profiler.BeginSample(nameof(FailingCommandWithException));
-		_commandManager.ExecuteCommand(SampleCommands.FailingCommandWithException);
-		Profiler.EndSample();
-
-		Dump();
-	}
-
-	private void SetText()
-	{
-		Profiler.BeginSample(nameof(SetText));
-		_commandManager.ExecuteCommand(SampleCommands.SetText, new TextCommandArgs { Text = "Current time: " + DateTime.Now.ToString("T") });
-		Profiler.EndSample();
-
-		Dump();
-	}
-
-	private async Task Sync()
-	{
-		await _commandManager.Sync();
-	}
-
-	private void Reset()
-	{
-		PlayerPrefs.DeleteAll();
-		_commandManager.ClearHistory();
-		Dump();
-	}
-
-	private void Start()
-	{
-		CreateButton("Add Value", AddValue);
-		CreateButton("Add Value By Name", AddValueByName);
-		CreateButton("Reset Value", ResetValue);
-		CreateButton("Reset and Add Value", ResetAndAddValue);
-		CreateButton("Add Value Multiple Times", AddValueMultipleTimes);
-		CreateButton("Nested Write Value", NestedWriteValue);
-		CreateButton("Add Float Value", AddFloatValue);
-		CreateButton("Add Random Double Value", AddRandomDoubleValue);
-		CreateButton("Log Value", LogValue);
-		CreateButton("Failing Command", FailingCommand);
-		CreateButton("Failing Command With Exception", FailingCommandWithException);
-		CreateButton("Set Text", SetText);
-		CreateButton("Sync (Clear Queue)", Sync);
-		CreateButton("Reset (Clear History & PlayerPrefs)", Reset);
-	}
-
-	private void CreateButton(string label, Action onClick)
-	{
-		var buttonObj = Instantiate(_buttonPrefab, _buttonsContainer);
-		var button = buttonObj.GetComponent<UnityEngine.UI.Button>();
-		var text = buttonObj.GetComponentInChildren<TextMeshProUGUI>();
-		text.text = label;
-		button.onClick.AddListener(() => onClick());
-	}
-
-	private void CreateButton(string label, Func<Task> onClickAsync)
-	{
-		var buttonObj = Instantiate(_buttonPrefab, _buttonsContainer);
-		var button = buttonObj.GetComponent<UnityEngine.UI.Button>();
-		var text = buttonObj.GetComponentInChildren<TextMeshProUGUI>();
-		text.text = label;
-		button.onClick.AddListener(() => _ = onClickAsync());
-	}
-
-	/// <summary>
-	/// Synchronization service that sends the command history to an HTTP API.
-	/// </summary>
-	public class UnityHttpSyncService : ISyncService
-	{
-		private readonly string _serverUrl;
-		private readonly ISerializer _serializer;
-
-		public UnityHttpSyncService(string serverUrl, ISerializer serializer)
-		{
-			_serverUrl = serverUrl;
-			_serializer = serializer;
-		}
-
-		public async Task<SyncResponse> SyncAsync(SyncRequest request, CancellationToken cancellationToken = default)
-		{
-			// Serialize the request (Commands + Hash)
-			string jsonPayload = _serializer.Serialize(request);
-
-			// Create a UnityWebRequest for POSTing the JSON payload to the server
-			using var www = new UnityWebRequest(_serverUrl, "POST");
-			byte[] bodyRaw = Encoding.UTF8.GetBytes(jsonPayload);
-			www.uploadHandler = new UploadHandlerRaw(bodyRaw);
-			www.downloadHandler = new DownloadHandlerBuffer();
-			www.SetRequestHeader("Content-Type", "application/json");
-
-			// Send the request and get an operation handle
-			var operation = www.SendWebRequest();
-
-			// Asynchronously wait for the web request to complete
-			while (!operation.isDone)
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-				await Task.Delay(10, cancellationToken); // Avoids blocking the main Unity thread
-			}
-
-			// Network error handling
-			if (www.result == UnityWebRequest.Result.ConnectionError || www.result == UnityWebRequest.Result.ProtocolError)
-			{
-				Debug.LogError($"[SyncService] Sync error: {www.error}");
-				return SyncResponse.Fail(www.error);
-			}
-
-			try
-			{
-				// Deserialize the server response
-				var responseText = www.downloadHandler.text;
-				var response = JsonConvert.DeserializeObject<SyncResponse>(responseText);
-
-				Debug.Log($"[SyncService] Server response: Success: {response.Success} with message: {response.Message}");
-				return response ?? SyncResponse.Fail("Failed to deserialize server response.");
-			}
-			catch (Exception e)
-			{
-				Debug.LogError($"[SyncService] Failed to read server response: {e.Message}");
-				return SyncResponse.Fail(e.Message);
-			}
-		}
-
-		public async Task<FetchResponse> FetchAsync(CancellationToken cancellationToken = default)
-		{
-			// Derives the state URL by replacing /sync with /state
-			string stateUrl = _serverUrl.Replace("/sync", "/state");
-
-			using var www = UnityWebRequest.Get(stateUrl);
-			var operation = www.SendWebRequest();
-
-			while (!operation.isDone)
-			{
-				cancellationToken.ThrowIfCancellationRequested();
-				await Task.Delay(10, cancellationToken);
-			}
-
-			if (www.result == UnityWebRequest.Result.ConnectionError || www.result == UnityWebRequest.Result.ProtocolError)
-			{
-				Debug.LogError($"[SyncService] Fetch state error: {www.error}");
-				return FetchResponse.Fail(www.error);
-			}
-
-			try
-			{
-				var responseText = www.downloadHandler.text;
-				// Deserialize the dictionary returned by the StateController
-				var response = _serializer.Deserialize<FetchResponse>(responseText);
-				return response ?? FetchResponse.Fail("Failed to deserialize server response.");
-			}
-			catch (Exception e)
-			{
-				Debug.LogError($"[SyncService] Failed to parse state from server: {e.Message}");
-				return FetchResponse.Fail(e.Message);
-			}
-		}
 	}
 }

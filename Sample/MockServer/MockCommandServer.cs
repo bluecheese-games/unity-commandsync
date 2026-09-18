@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using BlueCheese.CommandSync.Core;
 
@@ -15,7 +16,12 @@ namespace BlueCheese.CommandSync.Sample.MockServer
 	/// </summary>
 	public sealed class MockCommandServer
 	{
+		// Reserved storage key for the persisted list of known data types (see _knownTypes below).
+		// Not a valid C# Type.FullName, so it cannot collide with a real data type's storage entry.
+		private const string KnownTypesStorageKey = "__MockCommandServer_KnownTypes__";
+
 		private readonly ISerializer _serializer;
+		private readonly IDataStorage _storage;
 		private readonly DataManager _dataManager;
 		private readonly CommandManager _manager;
 		private readonly HashSet<Type> _knownTypes = new(); // Every data type the server has ever touched, for full-state export.
@@ -26,11 +32,35 @@ namespace BlueCheese.CommandSync.Sample.MockServer
 		/// </summary>
 		public bool ForceDesync { get; set; }
 
-		public MockCommandServer(ISerializer serializer = null)
+		/// <param name="dataStorage">
+		/// Backing storage for the server's authoritative state. Defaults to an in-memory store (fresh,
+		/// empty state every time a MockCommandServer is constructed — the right choice for isolated unit
+		/// tests). Pass a persistent storage (e.g. a PlayerPrefs-backed one, with its own prefix, distinct
+		/// from the client's) to survive across Play Mode restarts like a real backend's database would —
+		/// otherwise the "server" forgets everything on every restart while a client using persistent local
+		/// storage does not, which manifests as a spurious desync as soon as the client acts on data the
+		/// restarted server never saw.
+		/// </param>
+		public MockCommandServer(ISerializer serializer = null, IDataStorage dataStorage = null)
 		{
 			_serializer = serializer ?? new NewtonsoftJsonSerializer();
-			_dataManager = new DataManager(new InMemoryDataStorage(), _serializer);
+			_storage = dataStorage ?? new InMemoryDataStorage();
+			_dataManager = new DataManager(_storage, _serializer);
 			_manager = new CommandManager(_dataManager, serializer: _serializer);
+
+			// _knownTypes itself is in-memory bookkeeping, so restore it from a previous session too —
+			// otherwise HandleFetch would under-report even when the underlying storage is persistent.
+			if (_storage.TryLoad(KnownTypesStorageKey, out string[] knownTypeNames))
+			{
+				foreach (var typeName in knownTypeNames)
+				{
+					var type = TypeResolver.Resolve(typeName);
+					if (type != null)
+					{
+						_knownTypes.Add(type);
+					}
+				}
+			}
 		}
 
 		/// <summary>Registers the command definitions the server will replay (must match the client's).</summary>
@@ -56,10 +86,7 @@ namespace BlueCheese.CommandSync.Sample.MockServer
 				}
 			}
 
-			foreach (var type in _manager.UpdatedDataTypes)
-			{
-				_knownTypes.Add(type);
-			}
+			RememberKnownTypes(_manager.UpdatedDataTypes);
 
 			long serverHash = _dataManager.GetStateHash(_manager.UpdatedDataTypes);
 
@@ -75,6 +102,23 @@ namespace BlueCheese.CommandSync.Sample.MockServer
 		{
 			var state = _dataManager.ExportState(_knownTypes);
 			return _serializer.Serialize(FetchResponse.Ok(state));
+		}
+
+		private void RememberKnownTypes(IEnumerable<Type> types)
+		{
+			bool changed = false;
+			foreach (var type in types)
+			{
+				if (_knownTypes.Add(type))
+				{
+					changed = true;
+				}
+			}
+
+			if (changed)
+			{
+				_storage.Save(KnownTypesStorageKey, _knownTypes.Select(t => t.FullName).ToArray());
+			}
 		}
 	}
 }
