@@ -2,7 +2,7 @@
   "name": "games.bluecheese.unity-commandsync",
   "displayName": "BlueCheese CommandSync",
   "version": "1.0.0",
-  "unity": "6000.3.2",
+  "unity": "6000.3",
   "description": "Deterministic, replayable command sourcing with server synchronization for Unity applications.",
   "keywords": [ "library", "unity", "services", "backend", "request", "utilities" ],
   "category": "libraries",
