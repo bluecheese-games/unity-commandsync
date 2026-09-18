@@ -72,7 +72,3 @@ crashlytics-build.properties
 # Temporary auto-generated Android Assets
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
-MergeCS.ps1
-MergeCS.ps1.meta
-MergedProject.txt
-MergedProject.txt.meta
