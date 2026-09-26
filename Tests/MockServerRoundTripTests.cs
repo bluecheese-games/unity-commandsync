@@ -57,5 +57,31 @@ namespace BlueCheese.CommandSync.Tests
 			Assert.AreEqual(10, clientData.Get<TestScoreData>().Score,
 				"After desync recovery the client must adopt the authoritative server state.");
 		}
+
+		[Test]
+		public async Task Sync_WhenPluginAddedViaServerAddPlugin_ReplaysWithoutDesync()
+		{
+			// Only AddPlugin is called on both sides, no manual RegisterCommands(pluginAssembly) on the
+			// server — proves MockCommandServer.AddPlugin keeps the server in lock-step with the client,
+			// the same way CommandManager.AddPlugin already does for the client's own registry. Deliberately
+			// does NOT use the CreateClient helper: it blanket-registers the whole test assembly, which
+			// would double-register GreetingPlugin's commands once AddPlugin scans that same assembly.
+			var serializer = new NewtonsoftJsonSerializer();
+			var server = new MockCommandServer(serializer);
+			server.AddPlugin(new GreetingPlugin(new FakeGreetingService()));
+
+			var clientData = new DataManager(new FakeDataStorage(), serializer);
+			var client = new CommandManager(clientData,
+				syncService: new MockServerSyncService(server, serializer),
+				serializer: serializer);
+			client.AddPlugin(new GreetingPlugin(new FakeGreetingService()));
+
+			client.ExecuteCommand(nameof(GreetingCommands.Greet), new GreetArgs { Name = "Grace" });
+			await client.Sync();
+
+			Assert.AreEqual(0, client.History.Count, "A matching sync must clear the client history.");
+			Assert.AreEqual("Hello, Grace!", server.GetState<GreetingData>().LastGreeting,
+				"The server must have replayed the plugin's command to reach the same state.");
+		}
 	}
 }

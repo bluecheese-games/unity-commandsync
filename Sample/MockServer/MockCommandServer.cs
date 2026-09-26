@@ -66,6 +66,15 @@ namespace BlueCheese.CommandSync.Sample.MockServer
 		/// <summary>Registers the command definitions the server will replay (must match the client's).</summary>
 		public void RegisterCommands(Assembly assembly) => _manager.RegisterCommands(assembly);
 
+		/// <summary>
+		/// Installs a plugin on the server, mirroring <see cref="CommandManager.AddPlugin"/> on the client.
+		/// Without this, adding a plugin to the client alone (e.g. <c>clientManager.AddPlugin(new
+		/// LeaderboardPlugin())</c>) silently desyncs on the very first command the plugin defines, since the
+		/// server never learns about it — the caller had to remember a separate
+		/// <c>RegisterCommands(pluginAssembly)</c> call to keep both sides in lock-step.
+		/// </summary>
+		public void AddPlugin(IPlugin plugin) => _manager.AddPlugin(plugin);
+
 		/// <summary>Reads the server's authoritative value for a data type (for inspection in tests).</summary>
 		public T GetState<T>() where T : struct => _dataManager.Get<T>();
 
